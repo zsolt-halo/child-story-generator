@@ -5,8 +5,7 @@ Children's book generator: raw parenting notes → illustrated hardcover picture
 
 ## Tech Stack & Tooling
 - **Python 3.12+** managed with **uv** (never use pip/venv)
-- **Claude Opus 4.6** for story generation, keyframing, and translation
-- **Google Gemini API** for image generation (API key via `google-genai` SDK, NOT Vertex AI)
+- **Google Gemini API** for all generation — text (`gemini-2.5-pro`) and images (`gemini-2.5-flash-image`) via `google-genai` SDK (NOT Vertex AI)
 - **WeasyPrint** for HTML→PDF rendering
 - **Ghostscript** for screen PDF compression
 - **Pillow** for image upscaling and CMYK conversion
@@ -17,7 +16,7 @@ main.py                          # Click CLI entry point
 src/
   models.py                      # Pydantic v2 models (Story, Keyframe, BookConfig, Character)
   brain/
-    client.py                    # Anthropic client factory (direct API / corporate gateway)
+    client.py                    # Gemini client helpers (generate_text / generate_structured)
     storyteller.py               # Phase 1: notes → prose
     keyframer.py                 # Phase 2: prose → structured keyframes
     translator.py                # Phase 2b: full story → target language
@@ -40,9 +39,9 @@ configs/
 ```
 
 ## Pipeline Flow
-1. **Story** — Claude expands notes into 800-1500 word prose
-2. **Keyframes** — Claude breaks prose into 16 page-sized keyframes with visual descriptions (structured output via `messages.parse()`)
-3. **Translation** (optional) — Claude translates all text with full story context (delimiter-based output, not JSON)
+1. **Story** — Gemini expands notes into 800-1500 word prose
+2. **Keyframes** — Gemini breaks prose into 16 page-sized keyframes with visual descriptions (structured JSON output via `response_schema`)
+3. **Translation** (optional) — Gemini translates all text with full story context (delimiter-based output, not JSON)
 4. **Illustration** — Gemini generates images; cover prompt includes title text; all upscaled to 2400×2400
 5. **Backdrops** — Gemini generates 4 decorative text-page backgrounds
 6. **PDF** — WeasyPrint renders spread layout (illustration left, text right), produces 3 files:
@@ -56,11 +55,11 @@ configs/
 - Image generator skips existing files
 - Translation is saved in checkpoint and reused on subsequent `pdf` runs
 
-## Anthropic API Notes
-- Supports direct API (`ANTHROPIC_API_KEY`) and corporate gateway (`GATEWAY_BASE_URL` + `GATEWAY_API_KEY`)
-- Gateway auto-prefixes model with `anthropic/` (handled in `client.py`)
-- Gateway does NOT support assistant message prefill
-- Use `messages.parse()` with `output_format=PydanticModel` for structured output (attribute is `.parsed_output`)
+## Gemini API Notes
+- Single API key (`GEMINI_API_KEY`) for both text and image generation
+- Text generation uses `generate_text()` / `generate_structured()` helpers in `client.py`
+- Structured output uses `response_mime_type="application/json"` + `response_schema=PydanticModel`
+- Image generation uses `response_modalities=["IMAGE", "TEXT"]` (in `artist/generator.py`)
 
 ## Key CLI Commands
 ```bash
@@ -86,7 +85,7 @@ uv sync
 
 # 4. Configure API keys
 cp .env.example .env
-# Edit .env with ANTHROPIC_API_KEY (or GATEWAY_*) and GEMINI_API_KEY
+# Edit .env with GEMINI_API_KEY
 
 # 5. Run
 uv run python main.py generate examples/dance-and-vaccination.txt

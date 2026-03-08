@@ -907,7 +907,6 @@ name = "starlight-scribe"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "anthropic" },
     { name = "click" },
     { name = "google-genai" },
     { name = "jinja2" },
@@ -918,9 +917,14 @@ dependencies = [
     { name = "weasyprint" },
 ]
 
+[package.optional-dependencies]
+anthropic = [
+    { name = "anthropic" },
+]
+
 [package.metadata]
 requires-dist = [
-    { name = "anthropic", specifier = ">=0.52.0" },
+    { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.52.0" },
     { name = "click", specifier = ">=8.1.0" },
     { name = "google-genai", specifier = ">=1.0.0" },
     { name = "jinja2", specifier = ">=3.1.0" },
@@ -930,6 +934,7 @@ requires-dist = [
     { name = "rich", specifier = ">=13.0.0" },
     { name = "weasyprint", specifier = ">=62.0" },
 ]
+provides-extras = ["anthropic"]
 
 [[package]]
 name = "tenacity"

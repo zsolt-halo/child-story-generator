@@ -51,7 +51,7 @@ class BookConfig(BaseModel):
     pages: int = 16
     language: str = ""
     output: Path = Path("stories")
-    claude_model: str = "claude-opus-4-6"
+    text_model: str = "gemini-2.5-pro"
     image_model: str = "gemini-2.5-flash-image"
     gemini_api_key: str = ""
     gateway_base_url: str = ""

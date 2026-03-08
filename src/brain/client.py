@@ -1,33 +1,56 @@
 import os
 
-import anthropic
+from google import genai
+from google.genai import types
+from pydantic import BaseModel
 
 from src.models import BookConfig
 
-# Gateway requires anthropic/ prefix on model names
-_GATEWAY_MODEL_PREFIX = "anthropic/"
+
+def _create_client(config: BookConfig) -> genai.Client:
+    """Create a Gemini client using the configured API key."""
+    api_key = config.gemini_api_key or os.environ.get("GEMINI_API_KEY", "")
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY not set. Add it to .env or export it.")
+    return genai.Client(api_key=api_key)
 
 
-def create_client(config: BookConfig) -> anthropic.Anthropic:
-    """Create an Anthropic client, using gateway if configured."""
-    gateway_url = config.gateway_base_url or os.environ.get("GATEWAY_BASE_URL", "")
-    gateway_key = config.gateway_api_key or os.environ.get("GATEWAY_API_KEY", "")
-
-    if gateway_url and gateway_key:
-        return anthropic.Anthropic(base_url=gateway_url, api_key=gateway_key)
-
-    # Fall back to direct Anthropic API (uses ANTHROPIC_API_KEY env var)
-    return anthropic.Anthropic()
-
-
-def resolve_model(config: BookConfig) -> str:
-    """Return the model name, adding gateway prefix if needed."""
-    model = config.claude_model
-    is_gateway = bool(
-        (config.gateway_base_url or os.environ.get("GATEWAY_BASE_URL", ""))
-        and (config.gateway_api_key or os.environ.get("GATEWAY_API_KEY", ""))
+def generate_text(
+    config: BookConfig,
+    system_prompt: str,
+    user_prompt: str,
+    max_tokens: int = 8192,
+) -> str:
+    """Generate text using Gemini."""
+    client = _create_client(config)
+    response = client.models.generate_content(
+        model=config.text_model,
+        contents=user_prompt,
+        config=types.GenerateContentConfig(
+            system_instruction=system_prompt,
+            max_output_tokens=max_tokens,
+        ),
     )
+    return response.text
 
-    if is_gateway and "/" not in model:
-        return f"{_GATEWAY_MODEL_PREFIX}{model}"
-    return model
+
+def generate_structured(
+    config: BookConfig,
+    system_prompt: str,
+    user_prompt: str,
+    schema: type[BaseModel],
+    max_tokens: int = 16384,
+) -> BaseModel:
+    """Generate structured output using Gemini with a Pydantic schema."""
+    client = _create_client(config)
+    response = client.models.generate_content(
+        model=config.text_model,
+        contents=user_prompt,
+        config=types.GenerateContentConfig(
+            system_instruction=system_prompt,
+            max_output_tokens=max_tokens,
+            response_mime_type="application/json",
+            response_schema=schema,
+        ),
+    )
+    return schema.model_validate_json(response.text)

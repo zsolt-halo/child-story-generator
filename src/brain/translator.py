@@ -1,6 +1,6 @@
 import re
 
-from src.brain.client import create_client, resolve_model
+from src.brain.client import generate_text
 from src.models import BookConfig, Story
 
 _SYSTEM_PROMPT = """\
@@ -35,10 +35,7 @@ IMPORTANT: You MUST translate EVERY page. Do not skip or leave any page in Engli
 
 
 def translate_story(story: Story, language: str, config: BookConfig) -> Story:
-    """Translate all story text into the target language using Claude."""
-    client = create_client(config)
-    model = resolve_model(config)
-
+    """Translate all story text into the target language using Gemini."""
     # Build the full story text for context
     pages_text = "\n\n".join(
         f"===PAGE {kf.page_number}===\n{kf.page_text}"
@@ -54,18 +51,8 @@ You MUST translate ALL {len(story.keyframes)} pages — every single one.
 {story.dedication}
 {pages_text}"""
 
-    response = client.messages.create(
-        model=model,
-        max_tokens=16384,
-        system=[{
-            "type": "text",
-            "text": _SYSTEM_PROMPT,
-            "cache_control": {"type": "ephemeral"},
-        }],
-        messages=[{"role": "user", "content": user_prompt}],
-    )
-
-    raw = response.content[0].text.strip()
+    raw = generate_text(config, _SYSTEM_PROMPT, user_prompt, max_tokens=16384)
+    raw = raw.strip()
 
     # Parse the delimited output
     title_match = re.search(r'===TITLE===\s*\n(.+?)(?=\n===)', raw, re.DOTALL)

@@ -59,9 +59,10 @@ def cli():
 @click.option("--output", "-o", default=None, type=click.Path(path_type=Path))
 @click.option("--language", "-l", default=None, help="Translate story text (e.g., hungarian, german, french)")
 @click.option("--resume", is_flag=True, help="Resume from last checkpoint (skip completed phases)")
-def generate(notes_file: Path, character: str, narrator: str, style: str, pages: int, output: Path, language: str, resume: bool):
+@click.option("--model", "-m", default=None, help="Text model override (default: gemini-2.5-pro)")
+def generate(notes_file: Path, character: str, narrator: str, style: str, pages: int, output: Path, language: str, resume: bool, model: str):
     """Generate a complete illustrated book from notes."""
-    config = build_config(character=character, narrator=narrator, style=style, pages=pages, output=output)
+    config = build_config(character=character, narrator=narrator, style=style, pages=pages, output=output, text_model=model)
     char = load_character(config.character)
     style_data = load_style(config.style)
     style_desc = style_data["description"]
@@ -94,7 +95,7 @@ def generate(notes_file: Path, character: str, narrator: str, style: str, pages:
     if story is None:
         console.print(Panel(f"Generating story for [bold]{char.child_name}[/bold]...", title="Phase 1: Story"))
         with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), transient=True) as progress:
-            progress.add_task("Writing story with Claude...", total=None)
+            progress.add_task("Writing story with Gemini...", total=None)
             from src.brain.storyteller import generate_story
             title, prose = generate_story(notes, char, config, style_desc)
 
@@ -121,7 +122,7 @@ def generate(notes_file: Path, character: str, narrator: str, style: str, pages:
     if language and not story.title_translated:
         console.print(Panel(f"Translating to [bold]{language}[/bold]...", title="Phase 2b: Translation"))
         with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), transient=True) as progress:
-            progress.add_task(f"Translating with Claude...", total=None)
+            progress.add_task(f"Translating with Gemini...", total=None)
             from src.brain.translator import translate_story
             story = translate_story(story, language, config)
 
@@ -210,7 +211,7 @@ def pdf(story_dir: Path, language: str):
         config = build_config()
         console.print(Panel(f"Translating to [bold]{language}[/bold]...", title="Translation"))
         with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), transient=True) as progress:
-            progress.add_task("Translating with Claude...", total=None)
+            progress.add_task("Translating with Gemini...", total=None)
             from src.brain.translator import translate_story
             story = translate_story(story, language, config)
         console.print(f"[green]Translated title:[/green] {story.title_translated}")
@@ -241,9 +242,10 @@ def pdf(story_dir: Path, language: str):
 @click.option("--narrator", "-n", default=None, type=click.Choice(["whimsical", "bedtime", "heroic"]))
 @click.option("--style", "-s", default=None, type=click.Choice(["digital", "watercolor", "ghibli", "papercut"]))
 @click.option("--pages", "-p", default=None, type=click.IntRange(8, 24))
-def preview(notes_file: Path, character: str, narrator: str, style: str, pages: int):
+@click.option("--model", "-m", default=None, help="Text model override (default: gemini-2.5-pro)")
+def preview(notes_file: Path, character: str, narrator: str, style: str, pages: int, model: str):
     """Preview story and keyframes without generating images (fast, cheap)."""
-    config = build_config(character=character, narrator=narrator, style=style, pages=pages)
+    config = build_config(character=character, narrator=narrator, style=style, pages=pages, text_model=model)
     char = load_character(config.character)
     style_data = load_style(config.style)
     style_desc = style_data["description"]
@@ -256,7 +258,7 @@ def preview(notes_file: Path, character: str, narrator: str, style: str, pages: 
     # Phase 1
     console.print(Panel(f"Generating story for [bold]{char.child_name}[/bold]...", title="Phase 1: Story"))
     with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), transient=True) as progress:
-        progress.add_task("Writing story with Claude...", total=None)
+        progress.add_task("Writing story with Gemini...", total=None)
         from src.brain.storyteller import generate_story
         title, prose = generate_story(notes, char, config, style_desc)
 
