@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+@page {
+    size: 8.25in 8.25in; /* 8in + 0.125in bleed on each side */
+    margin: 0;
+    marks: crop;
+    bleed: 0.125in;
+
+    @top-left { content: none; }
+    @top-right { content: none; }
+    @bottom-left { content: none; }
+    @bottom-right { content: none; }
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html, body {
+    width: 8.25in;
+    font-family: 'Georgia', 'Times New Roman', serif;
+    color: #2c2c2c;
+}
+
+.page {
+    width: 8.25in;
+    height: 8.25in;
+    position: relative;
+    overflow: hidden;
+    page-break-after: always;
+    page-break-inside: avoid;
+}
+
+.page:last-child {
+    page-break-after: auto;
+}
+
+/* Full-bleed image (cover + illustration pages) */
+.page-illustration {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+/* ── Text page ── */
+
+.page-backdrop {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0.25;
+}
+
+.text-area {
+    position: absolute;
+    top: 0.5in;
+    bottom: 0.5in;
+    left: 0.6in;
+    right: 0.5in;
+    display: flex;
+    align-items: center;
+}
+
+.page-text {
+    font-size: 20pt;
+    line-height: 1.8;
+    text-align: left;
+}
+
+/* Page number */
+.page-number {
+    position: absolute;
+    bottom: 0.375in;
+    right: 0.5in;
+    font-size: 10pt;
+    color: rgba(100, 100, 100, 0.5);
+}
+</style>
+</head>
+<body>
+
+{% for page in pages %}
+{% if page.is_cover %}
+{# Cover: full-bleed AI-generated image with title baked in #}
+<div class="page">
+    <img class="page-illustration" src="{{ page.image_path }}" alt="Cover">
+</div>
+{% else %}
+{# Left page: full-bleed illustration #}
+<div class="page">
+    <img class="page-illustration" src="{{ page.image_path }}" alt="Illustration for page {{ page.display_number }}">
+</div>
+{# Right page: text with decorative backdrop #}
+<div class="page">
+    {% if backdrops %}
+    <img class="page-backdrop" src="{{ backdrops[(loop.index0) % backdrops|length] }}" alt="">
+    {% endif %}
+    <div class="text-area">
+        <p class="page-text">{{ page.page_text }}</p>
+    </div>
+    <div class="page-number">{{ page.display_number }}</div>
+</div>
+{% endif %}
+{% endfor %}
+
+</body>
+</html>

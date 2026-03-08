@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+@page {
+    size: 16in 8in;
+    margin: 0;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html, body {
+    width: 16in;
+    font-family: 'Georgia', 'Times New Roman', serif;
+    color: #2c2c2c;
+}
+
+.spread {
+    width: 16in;
+    height: 8in;
+    position: relative;
+    display: flex;
+    page-break-after: always;
+    page-break-inside: avoid;
+    overflow: hidden;
+}
+
+.spread:last-child {
+    page-break-after: auto;
+}
+
+.half {
+    width: 8in;
+    height: 8in;
+    position: relative;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+/* Spine line between the two halves */
+.spread::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 50%;
+    width: 1px;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.08);
+    z-index: 10;
+}
+
+/* ── Full-bleed image ── */
+.half-illustration img {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+/* ── Cover spread ── */
+.cover-bg {
+    background: #1a1a2e;
+}
+
+.cover-bg img {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+/* ── Text page ── */
+.half-text {
+    background: #fefefe;
+}
+
+.half-text .backdrop {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0.25;
+}
+
+.text-area {
+    position: absolute;
+    top: 0.4in;
+    bottom: 0.4in;
+    left: 0.5in;
+    right: 0.4in;
+    display: flex;
+    align-items: center;
+}
+
+.page-text {
+    font-size: 18pt;
+    line-height: 1.75;
+    text-align: left;
+}
+
+.page-number {
+    position: absolute;
+    bottom: 0.3in;
+    right: 0.4in;
+    font-size: 9pt;
+    color: rgba(100, 100, 100, 0.45);
+}
+</style>
+</head>
+<body>
+
+{% for page in pages %}
+{% if page.is_cover %}
+{# Cover spread: dark left endpaper + cover image on the right #}
+<div class="spread">
+    <div class="half cover-bg"></div>
+    <div class="half half-illustration">
+        <img src="{{ page.image_path }}" alt="Cover">
+    </div>
+</div>
+{% else %}
+{# Story spread: illustration left, text right #}
+<div class="spread">
+    <div class="half half-illustration">
+        <img src="{{ page.image_path }}" alt="Illustration for page {{ page.display_number }}">
+    </div>
+    <div class="half half-text">
+        {% if backdrops %}
+        <img class="backdrop" src="{{ backdrops[(loop.index0) % backdrops|length] }}" alt="">
+        {% endif %}
+        <div class="text-area">
+            <p class="page-text">{{ page.page_text }}</p>
+        </div>
+        <div class="page-number">{{ page.display_number }}</div>
+    </div>
+</div>
+{% endif %}
+{% endfor %}
+
+</body>
+</html>

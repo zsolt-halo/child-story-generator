@@ -1,0 +1,16 @@
+[character]
+name = "Princess Mudboots"
+child_name = "Lana"
+
+[character.personality]
+traits = ["adventurous", "kind", "fearless", "messy"]
+speech_style = "bold and encouraging, talks to animals and trees as if they can understand"
+
+[character.visual]
+description = "A young girl with wild curly brown hair, rosy cheeks, and a determined smile"
+constants = "wearing a bright yellow cape over a simple dress, muddy brown boots, carrying a wooden sword"
+color_palette = ["#FFD700", "#8B4513", "#FF69B4", "#228B22", "#4169E1"]
+
+[character.story_rules]
+always = "Princess Mudboots mirrors what Lana did that day, reimagined as a brave quest through an enchanted kingdom"
+never = "No scary situations, no true villains, no sadness without resolution, no real danger"

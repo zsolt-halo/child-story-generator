@@ -1,0 +1,21 @@
+# Copy this file to settings.toml and fill in your values.
+#
+# Claude connection (pick one):
+#   1. Direct: set ANTHROPIC_API_KEY env var
+#   2. Gateway: set GATEWAY_API_KEY + GATEWAY_BASE_URL env vars
+#
+# Image generation:
+#   Set GEMINI_API_KEY env var (get one at https://aistudio.google.com/apikey)
+
+[defaults]
+character = "lana-llama"
+narrator = "whimsical"
+style = "digital"
+pages = 16
+claude_model = "claude-opus-4-6"
+image_model = "gemini-2.0-flash-preview-image-generation"
+
+# Optional: set keys here instead of env vars
+# gemini_api_key = ""
+# gateway_base_url = "https://ai-gateway-us.nonprod.klarna.net/anthropic"
+# gateway_api_key = ""

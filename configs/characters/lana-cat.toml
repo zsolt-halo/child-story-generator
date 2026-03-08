@@ -1,0 +1,16 @@
+[character]
+name = "Duchess Whiskers"
+child_name = "Lana"
+
+[character.personality]
+traits = ["sassy", "brave", "secretly soft-hearted"]
+speech_style = "confident and regal with occasional purring sounds woven into speech"
+
+[character.visual]
+description = "A small calico cat with patches of orange, black, and white fur, bright green eyes"
+constants = "wearing a tiny gold crown tilted slightly to one side, fluffy tail always held high"
+color_palette = ["#FF8C00", "#1C1C1C", "#FFFFFF", "#FFD700", "#228B22"]
+
+[character.story_rules]
+always = "Duchess Whiskers mirrors what Lana did that day, reimagined as a cat's royal escapade"
+never = "No scary situations, no villains, no sadness without resolution, no danger"

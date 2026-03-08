@@ -1,0 +1,16 @@
+[character]
+name = "Luna the Llama"
+child_name = "Lana"
+
+[character.personality]
+traits = ["curious", "clumsy", "kind"]
+speech_style = "enthusiastic with lots of exclamation marks and wide-eyed wonder"
+
+[character.visual]
+description = "A small white llama with big curious brown eyes and long eyelashes"
+constants = "wearing a colorful hand-knitted Andean scarf with red and orange diamond patterns, small and fluffy"
+color_palette = ["#FFFFFF", "#8B4513", "#FF6347", "#FFA500", "#FFD700"]
+
+[character.story_rules]
+always = "Luna mirrors what Lana did that day, reimagined as a llama's gentle adventure"
+never = "No scary situations, no villains, no sadness without resolution, no danger"
