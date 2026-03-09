@@ -70,7 +70,7 @@ def render_book_pdf(
 
     # Write intermediate HTML for debugging
     html_path = output_path.with_suffix(".html")
-    html_path.write_text(html_content)
+    html_path.write_text(html_content, encoding="utf-8")
 
     HTML(string=html_content, base_url=str(TEMPLATES_DIR)).write_pdf(str(output_path))
 
@@ -109,7 +109,7 @@ def render_spread_pdf(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     html_path = output_path.with_suffix(".html")
-    html_path.write_text(html_content)
+    html_path.write_text(html_content, encoding="utf-8")
 
     HTML(string=html_content, base_url=str(TEMPLATES_DIR)).write_pdf(str(output_path))
 
@@ -123,21 +123,37 @@ def render_spread_pdf(
 
 
 def render_screen_pdf(print_pdf: Path, output_path: Path, dpi: int = 120) -> Path | None:
-    """Compress print PDF to a screen-friendly size using Ghostscript."""
+    """Compress print PDF to a screen-friendly size using PyMuPDF."""
     try:
-        subprocess.run(
-            [
-                "gs", "-sDEVICE=pdfwrite", "-dCompatibilityLevel=1.5",
-                "-dPDFSETTINGS=/ebook",
-                f"-dDownsampleColorImages=true", f"-dColorImageResolution={dpi}",
-                f"-dDownsampleGrayImages=true", f"-dGrayImageResolution={dpi}",
-                "-dNOPAUSE", "-dQUIET", "-dBATCH",
-                f"-sOutputFile={output_path}",
-                str(print_pdf),
-            ],
-            check=True,
-            capture_output=True,
+        import fitz  # PyMuPDF
+
+        doc = fitz.open(str(print_pdf))
+        doc.rewrite_images(
+            dpi_threshold=150,
+            dpi_target=dpi,
+            quality=70,
+            lossy=True,
+            lossless=True,
         )
+        doc.ez_save(str(output_path), garbage=4, deflate=True)
+        doc.close()
         return output_path
-    except (FileNotFoundError, subprocess.CalledProcessError):
-        return None
+    except Exception:
+        # Fallback: try Ghostscript if PyMuPDF fails
+        try:
+            subprocess.run(
+                [
+                    "gs", "-sDEVICE=pdfwrite", "-dCompatibilityLevel=1.5",
+                    "-dPDFSETTINGS=/ebook",
+                    f"-dDownsampleColorImages=true", f"-dColorImageResolution={dpi}",
+                    f"-dDownsampleGrayImages=true", f"-dGrayImageResolution={dpi}",
+                    "-dNOPAUSE", "-dQUIET", "-dBATCH",
+                    f"-sOutputFile={output_path}",
+                    str(print_pdf),
+                ],
+                check=True,
+                capture_output=True,
+            )
+            return output_path
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            return None

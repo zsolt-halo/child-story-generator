@@ -1,4 +1,3 @@
-import json
 import os
 import platform
 from pathlib import Path
@@ -9,39 +8,24 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 
-from src.models import Story
 from src.utils.config import build_config, load_character, load_style
-from src.utils.io import slugify
+from src.utils.io import slugify, save_checkpoint, load_checkpoint, load_metadata, CHECKPOINT_FILE
 
 load_dotenv()
 
-# Homebrew libraries (pango/gobject) need to be discoverable for WeasyPrint
+# Native libraries (pango/gobject) need to be discoverable for WeasyPrint
 if platform.system() == "Darwin":
     brew_lib = "/opt/homebrew/lib"
     if os.path.isdir(brew_lib):
         os.environ.setdefault("DYLD_FALLBACK_LIBRARY_PATH", brew_lib)
+elif platform.system() == "Windows":
+    # MSYS2 UCRT64 provides GTK/Pango DLLs needed by WeasyPrint
+    msys2_bin = r"C:\msys64\ucrt64\bin"
+    if os.path.isdir(msys2_bin):
+        os.add_dll_directory(msys2_bin)
+        os.environ["PATH"] = msys2_bin + os.pathsep + os.environ.get("PATH", "")
 
 console = Console()
-
-CHECKPOINT_FILE = "story.json"
-
-
-def _save_checkpoint(output_dir: Path, story: Story, image_paths: list[str] | None = None):
-    """Save pipeline state so we can resume later."""
-    output_dir.mkdir(parents=True, exist_ok=True)
-    data = {
-        "story": story.model_dump(),
-        "image_paths": image_paths or [],
-    }
-    (output_dir / CHECKPOINT_FILE).write_text(json.dumps(data, indent=2))
-
-
-def _load_checkpoint(output_dir: Path) -> tuple[Story, list[Path]]:
-    """Load saved pipeline state."""
-    data = json.loads((output_dir / CHECKPOINT_FILE).read_text())
-    story = Story.model_validate(data["story"])
-    image_paths = [Path(p) for p in data.get("image_paths", [])]
-    return story, image_paths
 
 
 @click.group()
@@ -82,7 +66,7 @@ def generate(notes_file: Path, character: str, narrator: str, style: str, pages:
         candidates = sorted(config.output.glob("*/story.json"), key=lambda p: p.stat().st_mtime, reverse=True)
         if candidates:
             output_dir = candidates[0].parent
-            story, image_paths = _load_checkpoint(output_dir)
+            story, image_paths = load_checkpoint(output_dir)
             console.print(f"[yellow]Resuming from:[/yellow] {output_dir}")
             console.print(f"[yellow]Story:[/yellow] {story.title} ({len(story.keyframes)} pages)")
             if image_paths:
@@ -113,10 +97,41 @@ def generate(notes_file: Path, character: str, narrator: str, style: str, pages:
         if cover_kf:
             console.print(f"[green]Cover page:[/green] {cover_kf.page_number}\n")
 
-        # Save checkpoint after story + keyframes
+        # Save checkpoint after story + keyframes (with metadata for branching)
         output_dir = config.output / slugify(story.title)
-        _save_checkpoint(output_dir, story)
+        from datetime import datetime
+        metadata = {
+            "notes": notes,
+            "config": {
+                "character": config.character,
+                "narrator": config.narrator,
+                "style": config.style,
+                "pages": config.pages,
+                "language": language or None,
+            },
+            "parent_slug": None,
+            "created_at": datetime.now().isoformat(),
+        }
+        save_checkpoint(output_dir, story, metadata=metadata)
         console.print(f"[dim]Checkpoint saved to {output_dir / CHECKPOINT_FILE}[/dim]\n")
+
+    # Phase 2.5: Cast Extraction (character consistency)
+    if not story.cast:
+        console.print(Panel("Extracting character cast for visual consistency...", title="Phase 2.5: Cast"))
+        with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), transient=True) as progress:
+            progress.add_task("Analyzing characters with Gemini...", total=None)
+            from src.brain.cast_extractor import extract_cast
+            story = extract_cast(story, char, config)
+
+        if story.cast:
+            console.print(f"[green]Cast members:[/green] {len(story.cast)}")
+            for member in story.cast:
+                pages = ", ".join(str(p) for p in member.appears_on_pages)
+                console.print(f"  [dim]{member.name}[/dim] ({member.species}) — pages {pages}")
+            save_checkpoint(output_dir, story)
+            console.print(f"[dim]Checkpoint updated with cast[/dim]\n")
+        else:
+            console.print("[dim]No secondary characters found[/dim]\n")
 
     # Phase 2b: Translation (if requested and not already done)
     if language and not story.title_translated:
@@ -127,7 +142,7 @@ def generate(notes_file: Path, character: str, narrator: str, style: str, pages:
             story = translate_story(story, language, config)
 
         console.print(f"[green]Translated title:[/green] {story.title_translated}")
-        _save_checkpoint(output_dir, story)
+        save_checkpoint(output_dir, story)
         console.print(f"[dim]Checkpoint updated with translation[/dim]\n")
 
     images_dir = output_dir / "images"
@@ -145,11 +160,11 @@ def generate(notes_file: Path, character: str, narrator: str, style: str, pages:
         from src.artist.generator import generate_all_illustrations
         image_paths = generate_all_illustrations(
             story.keyframes, char, config, style_anchor, images_dir, progress,
-            title=story.title,
+            title=story.title, cast=story.cast or None,
         )
 
     # Update checkpoint with image paths
-    _save_checkpoint(output_dir, story, [str(p) for p in image_paths])
+    save_checkpoint(output_dir, story, [str(p) for p in image_paths])
     console.print(f"[green]Images saved to:[/green] {images_dir}\n")
 
     # Phase 3b: Backdrops for text pages
@@ -202,20 +217,26 @@ def pdf(story_dir: Path, language: str):
         console.print(f"[red]No {CHECKPOINT_FILE} found in {story_dir}.[/red]")
         raise SystemExit(1)
 
-    story, image_paths = _load_checkpoint(story_dir)
+    story, image_paths = load_checkpoint(story_dir)
     console.print(f"[green]Story:[/green] {story.title} ({len(story.keyframes)} pages)")
 
     # Translate if requested and not already done
     if language and not story.title_translated:
         from src.utils.config import build_config
-        config = build_config()
+        meta = load_metadata(story_dir)
+        if meta and meta.get("config"):
+            mc = meta["config"]
+            config = build_config(character=mc.get("character"), narrator=mc.get("narrator"),
+                                  style=mc.get("style"), pages=mc.get("pages"))
+        else:
+            config = build_config()
         console.print(Panel(f"Translating to [bold]{language}[/bold]...", title="Translation"))
         with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), transient=True) as progress:
             progress.add_task("Translating with Gemini...", total=None)
             from src.brain.translator import translate_story
             story = translate_story(story, language, config)
         console.print(f"[green]Translated title:[/green] {story.title_translated}")
-        _save_checkpoint(story_dir, story, [str(p) for p in image_paths])
+        save_checkpoint(story_dir, story, [str(p) for p in image_paths])
     elif story.title_translated:
         console.print(f"[green]Translation:[/green] {story.title_translated}")
 
@@ -307,6 +328,30 @@ def list_characters():
             console.print(f"  [bold]{path.stem}[/bold] - {char.name} (for {char.child_name})")
         except Exception as e:
             console.print(f"  [red]{path.stem}[/red] - Error: {e}")
+
+
+@cli.command()
+@click.option("--host", default="127.0.0.1", help="Host to bind to")
+@click.option("--port", default=8000, type=int, help="Port to bind to")
+@click.option("--reload", is_flag=True, help="Enable auto-reload for development")
+def serve(host: str, port: int, reload: bool):
+    """Start the web UI server."""
+    try:
+        import uvicorn
+    except ImportError:
+        console.print("[red]Web dependencies not installed. Run: uv sync --extra web[/red]")
+        raise SystemExit(1)
+
+    console.print(f"[bold green]Starting StarlightScribe Web UI[/bold green]")
+    console.print(f"  Server: http://{host}:{port}")
+    console.print(f"  API docs: http://{host}:{port}/docs")
+
+    uvicorn.run(
+        "server.app:app",
+        host=host,
+        port=port,
+        reload=reload,
+    )
 
 
 if __name__ == "__main__":

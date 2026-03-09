@@ -54,3 +54,26 @@ def generate_structured(
         ),
     )
     return schema.model_validate_json(response.text)
+
+
+def generate_multimodal(
+    config: BookConfig,
+    system_prompt: str,
+    image_bytes: bytes,
+    text_prompt: str,
+    max_tokens: int = 4096,
+) -> str:
+    """Send image + text to Gemini for multimodal analysis."""
+    client = _create_client(config)
+    response = client.models.generate_content(
+        model=config.text_model,
+        contents=[
+            types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
+            text_prompt,
+        ],
+        config=types.GenerateContentConfig(
+            system_instruction=system_prompt,
+            max_output_tokens=max_tokens,
+        ),
+    )
+    return response.text

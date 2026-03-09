@@ -36,10 +36,20 @@ class Keyframe(BaseModel):
     page_text_translated: str | None = None
 
 
+class CastMember(BaseModel):
+    name: str
+    role: str
+    species: str
+    visual_description: str
+    visual_constants: str
+    appears_on_pages: list[int]
+
+
 class Story(BaseModel):
     title: str
     dedication: str = ""
     keyframes: list[Keyframe]
+    cast: list[CastMember] = Field(default_factory=list)
     title_translated: str | None = None
     dedication_translated: str | None = None
 

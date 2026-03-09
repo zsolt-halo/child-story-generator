@@ -9,20 +9,29 @@ from google.genai import types
 from PIL import Image
 from rich.progress import Progress
 
-from src.models import BookConfig, Character, Keyframe
+from src.models import BookConfig, CastMember, Character, Keyframe
 
 RETRY_DELAY = 5.0
 MAX_RETRIES = 2
 
 
-def _build_image_prompt(
+def build_image_prompt(
     keyframe: Keyframe, character: Character, style_anchor: str, title: str = "",
+    cast: list[CastMember] | None = None,
 ) -> str:
     parts = [
         keyframe.visual_description,
         f"Art style: {style_anchor}",
         f"Mood: {keyframe.mood}",
     ]
+    if cast:
+        relevant = [m for m in cast if keyframe.page_number in m.appears_on_pages]
+        if relevant:
+            cast_desc = "; ".join(
+                f"{m.name}: {m.visual_description}, {m.visual_constants}"
+                for m in relevant
+            )
+            parts.append(f"Secondary characters in this scene: {cast_desc}")
     if keyframe.is_cover and title:
         parts.append(
             f'This is a children\'s book cover. Include the title "{title}" as beautiful, '
@@ -35,7 +44,7 @@ def _build_image_prompt(
     return ". ".join(parts)
 
 
-def _create_client(config: BookConfig) -> genai.Client:
+def create_image_client(config: BookConfig) -> genai.Client:
     api_key = config.gemini_api_key or os.environ.get("GEMINI_API_KEY", "")
     if not api_key:
         raise ValueError("GEMINI_API_KEY not set. Add it to .env or export it.")
@@ -115,6 +124,7 @@ def generate_all_illustrations(
     output_dir: Path,
     progress: Progress | None = None,
     title: str = "",
+    cast: list[CastMember] | None = None,
 ) -> list[Path]:
     """Generate illustrations for all keyframes. Skips images that already exist."""
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -138,9 +148,9 @@ def generate_all_illustrations(
             continue
 
         if client is None:
-            client = _create_client(config)
+            client = create_image_client(config)
 
-        prompt = _build_image_prompt(kf, character, style_anchor, title=title)
+        prompt = build_image_prompt(kf, character, style_anchor, title=title, cast=cast)
 
         raw_path = output_dir / f"{prefix}_raw.png"
         generate_single_image(client, prompt, config.image_model, raw_path)
@@ -206,7 +216,7 @@ def generate_backdrops(
             continue
 
         if client is None:
-            client = _create_client(config)
+            client = create_image_client(config)
 
         prompt = _BACKDROP_PROMPTS[i].format(style=style_anchor)
         raw_path = output_dir / f"backdrop_{i + 1:02d}_raw.png"

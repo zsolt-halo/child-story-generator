@@ -1,4 +1,4 @@
-from src.models import Character
+from src.models import Character, CastMember
 
 NARRATOR_PERSONAS = {
     "whimsical": {
@@ -93,3 +93,83 @@ Given a complete story, split it into pages. For each page:
 The first keyframe (page 1) should be the story opening. The cover keyframe can be any page.
 Every visual_description must mention: "{character.visual.description}, {character.visual.constants}" to maintain character consistency.
 Aim for the number of pages specified by the user."""
+
+
+def _infer_species(character: Character) -> str:
+    """Infer the protagonist's species from their visual description."""
+    desc = character.visual.description.lower()
+    animals = [
+        "llama", "cat", "dog", "bear", "rabbit", "bunny", "fox", "owl",
+        "mouse", "hedgehog", "penguin", "elephant", "lion", "tiger",
+        "deer", "panda", "monkey", "duck", "frog", "pig", "cow", "horse",
+    ]
+    for animal in animals:
+        if animal in desc:
+            return animal
+    humans = ["girl", "boy", "child", "princess", "prince", "kid"]
+    for human in humans:
+        if human in desc:
+            return f"human ({human})"
+    return "character"
+
+
+def build_cast_extraction_prompt(character: Character) -> str:
+    species = _infer_species(character)
+    return f"""You are a children's book art director ensuring visual consistency across all illustrations.
+
+## Task
+Analyze the complete story and all keyframes to identify EVERY named or recurring secondary character.
+For each character, create a unified visual description that will be used across all illustrations.
+
+## Protagonist (DO NOT include in your output)
+The protagonist is {character.name}: {character.visual.description}, {character.visual.constants}.
+Do NOT include the protagonist in the cast list — they are already handled separately.
+
+## Species Consistency Rule
+The protagonist is a **{species}**.
+- If the protagonist is an animal, ALL characters should be animals too. Family members (mom, dad, siblings) are the SAME species as the protagonist. Friends and other characters should also be animals — pick a species that fits their personality or role if the story doesn't specify one.
+- If the protagonist is a human, secondary characters should be humans unless the story explicitly introduces animal characters.
+- Whatever species you assign to a character, it must be CONSISTENT across every page they appear on.
+
+## Instructions
+For each secondary character you identify:
+1. **name**: Their name as used in the story (e.g., "Papa Llama", "Hedvig", "Bence")
+2. **role**: Their relationship/role (e.g., "father", "best friend", "baby brother")
+3. **species**: What species they are (following the rules above)
+4. **visual_description**: A DETAILED, SPECIFIC visual description for image generation. Include body type/size/age, fur/hair/skin color, distinguishing features, facial expression tendency. Be specific enough that an image model produces the same character every time.
+5. **visual_constants**: Specific accessories, clothing, or features that MUST appear every time (like the protagonist's scarf). Be creative — give each character a signature look that's memorable and easy for an image model to reproduce.
+6. **appears_on_pages**: List every page number where this character should be VISIBLE in the illustration (not just mentioned in text).
+
+## Important
+- Be thorough: even characters who appear briefly need a description
+- Family members should share species-appropriate family resemblance with the protagonist
+- Each character needs DISTINCTIVE features so they are clearly different from each other and the protagonist
+- Keep visual constants simple and reproducible (a hat, a bow, an apron — not complex patterns)"""
+
+
+def build_cast_rewrite_prompt(character: Character) -> str:
+    return f"""You are a children's book art director. Rewrite illustration descriptions to ensure character consistency.
+
+## Protagonist
+{character.name}: {character.visual.description}, {character.visual.constants}.
+The protagonist description is ALREADY correct. Do not change how the protagonist is described.
+
+## Your Task
+For each page, you receive the current visual_description and the CANONICAL descriptions of secondary characters appearing on that page.
+
+Rewrite each visual_description so that:
+1. Every secondary character is described using their EXACT canonical visual description and visual constants
+2. The scene composition, lighting, mood, and action remain the same
+3. Vague descriptions (e.g., "a small hedgehog") are replaced with the full canonical description
+4. No character details contradict the cast sheet
+5. The protagonist's visual constants remain unchanged
+6. The overall length and detail level stay similar to the original
+
+Output ONLY the rewritten visual descriptions in this exact format:
+===PAGE 1===
+rewritten visual description here
+===PAGE 2===
+rewritten visual description here
+...
+
+Include ALL pages, even if no changes are needed (copy the original in that case)."""

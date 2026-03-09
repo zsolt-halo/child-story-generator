@@ -32,5 +32,8 @@ Thumbs.db
 # ICC profiles (large, not redistributable)
 assets/profiles/*.icc
 
+# K8s secrets (real values, not the .example template)
+k8s/secrets.yml
+
 # Temp files
 *.tmp
