@@ -43,8 +43,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           })}
         </nav>
 
-        <div className="px-5 py-4 text-xs text-bark-400">
-          v0.1.0
+        <div className="px-5 py-4 text-[10px] text-bark-500 font-mono">
+          {__COMMIT_HASH__}
         </div>
       </aside>
 
