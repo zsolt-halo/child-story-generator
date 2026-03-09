@@ -1,3 +1,4 @@
+import uuid
 import tomllib
 from pathlib import Path
 
@@ -48,3 +49,34 @@ def build_config(**overrides) -> BookConfig:
     defaults = settings.get("defaults", {})
     merged = {**defaults, **{k: v for k, v in overrides.items() if v is not None}}
     return BookConfig(**merged)
+
+
+def resolve_character(identifier: str) -> Character:
+    """Resolve a character from either DB (custom:<uuid>) or TOML config.
+
+    If *identifier* starts with ``custom:``, the trailing UUID is used to look
+    up the character from the database via ``CharacterRepository`` (sync).
+    Otherwise the identifier is treated as a TOML config name and passed to
+    ``load_character``.
+    """
+    if identifier.startswith("custom:"):
+        char_id = uuid.UUID(identifier.removeprefix("custom:"))
+        from src.db.character_repository import CharacterRepository
+        return CharacterRepository().get_by_id(char_id)
+    return load_character(identifier)
+
+
+async def async_resolve_character(identifier: str) -> Character:
+    """Async version of :func:`resolve_character` for server use.
+
+    If *identifier* starts with ``custom:``, the trailing UUID is used to look
+    up the character from the database via ``CharacterRepository`` (async).
+    Otherwise the identifier is treated as a TOML config name and passed to
+    ``load_character``.
+    """
+    if identifier.startswith("custom:"):
+        char_id = uuid.UUID(identifier.removeprefix("custom:"))
+        from src.db.character_repository import CharacterRepository, _row_to_character
+        row = await CharacterRepository().async_get_by_id(char_id)
+        return _row_to_character(row)
+    return load_character(identifier)

@@ -9,6 +9,10 @@ import type {
   TaskStatus,
   SanityCheckResult,
   BranchRequest,
+  CharacterDetail,
+  CharacterCreateRequest,
+  CharacterPolishRequest,
+  CharacterPolishResponse,
 } from "./types";
 
 const BASE = "/api";
@@ -70,3 +74,19 @@ export const checkSinglePage = (slug: string, page: number) =>
   request<SanityCheckResult>(`/sanity/check/${slug}/${page}`, { method: "POST" });
 export const startAutoFix = (slug: string, page: number) =>
   request<TaskResponse>(`/sanity/fix/${slug}/${page}`, { method: "POST" });
+
+// Characters (full CRUD)
+export const listAllCharacters = () => request<CharacterDetail[]>("/characters/");
+export const getCharacterDetail = (id: string) => request<CharacterDetail>(`/characters/${id}`);
+export const createCharacter = (data: CharacterCreateRequest) =>
+  request<CharacterDetail>("/characters/", { method: "POST", body: JSON.stringify(data) });
+export const updateCharacter = (id: string, data: Record<string, unknown>) =>
+  request<CharacterDetail>(`/characters/${id}`, { method: "PUT", body: JSON.stringify(data) });
+export const deleteCharacter = (id: string) =>
+  request(`/characters/${id}`, { method: "DELETE" });
+export const duplicateCharacter = (id: string) =>
+  request<CharacterDetail>(`/characters/${id}/duplicate`, { method: "POST" });
+export const duplicateTemplate = (slug: string) =>
+  request<CharacterDetail>(`/characters/duplicate-template/${slug}`, { method: "POST" });
+export const polishCharacter = (data: CharacterPolishRequest) =>
+  request<CharacterPolishResponse>("/characters/polish", { method: "POST", body: JSON.stringify(data) });

@@ -9,7 +9,7 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 
 from src.models import Story
-from src.utils.config import build_config, load_character, load_style
+from src.utils.config import build_config, load_character, load_style, resolve_character
 from src.utils.io import slugify
 
 load_dotenv()
@@ -54,7 +54,7 @@ def cli():
 def generate(notes_file: Path, character: str, narrator: str, style: str, pages: int, output: Path, language: str, resume: bool, model: str):
     """Generate a complete illustrated book from notes."""
     config = build_config(character=character, narrator=narrator, style=style, pages=pages, output=output, text_model=model)
-    char = load_character(config.character)
+    char = resolve_character(config.character)
     style_data = load_style(config.style)
     style_desc = style_data["description"]
     notes = notes_file.read_text().strip()
@@ -291,7 +291,7 @@ def pdf(story_dir: Path, language: str):
 def preview(notes_file: Path, character: str, narrator: str, style: str, pages: int, model: str):
     """Preview story and keyframes without generating images (fast, cheap)."""
     config = build_config(character=character, narrator=narrator, style=style, pages=pages, text_model=model)
-    char = load_character(config.character)
+    char = resolve_character(config.character)
     style_data = load_style(config.style)
     style_desc = style_data["description"]
     notes = notes_file.read_text().strip()

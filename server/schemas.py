@@ -82,6 +82,64 @@ class SanityCheckResult(BaseModel):
     suggested_visual_description: str | None = None
 
 
+class CharacterPersonalitySchema(BaseModel):
+    traits: list[str]
+    speech_style: str
+
+
+class CharacterVisualSchema(BaseModel):
+    description: str
+    constants: str
+    color_palette: list[str] = []
+
+
+class CharacterStoryRulesSchema(BaseModel):
+    always: str
+    never: str
+
+
+class CharacterDetail(BaseModel):
+    id: str | None = None  # None for TOML templates
+    slug: str
+    name: str
+    child_name: str
+    personality: CharacterPersonalitySchema
+    visual: CharacterVisualSchema
+    story_rules: CharacterStoryRulesSchema
+    is_template: bool = False
+    pipeline_id: str  # What to send to pipeline: bare slug for templates, "custom:<uuid>" for DB
+
+
+class CharacterCreateRequest(BaseModel):
+    slug: str
+    name: str
+    child_name: str
+    personality: CharacterPersonalitySchema
+    visual: CharacterVisualSchema
+    story_rules: CharacterStoryRulesSchema
+
+
+class CharacterUpdateRequest(BaseModel):
+    slug: str | None = None
+    name: str | None = None
+    child_name: str | None = None
+    personality: CharacterPersonalitySchema | None = None
+    visual: CharacterVisualSchema | None = None
+    story_rules: CharacterStoryRulesSchema | None = None
+
+
+class CharacterPolishRequest(BaseModel):
+    name: str
+    child_name: str
+    rough_description: str
+
+
+class CharacterPolishResponse(BaseModel):
+    personality: CharacterPersonalitySchema
+    visual: CharacterVisualSchema
+    story_rules: CharacterStoryRulesSchema
+
+
 class CharacterInfo(BaseModel):
     name: str
     slug: str

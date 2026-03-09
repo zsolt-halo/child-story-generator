@@ -34,7 +34,7 @@ class StoryRow(Base):
     dedication_translated: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     parent_slug: Mapped[str | None] = mapped_column(String(80), nullable=True)
-    character: Mapped[str] = mapped_column(String(80), default="lana-llama")
+    character: Mapped[str] = mapped_column(String(200), default="lana-llama")
     narrator: Mapped[str] = mapped_column(String(40), default="whimsical")
     style: Mapped[str] = mapped_column(String(40), default="digital")
     pages: Mapped[int] = mapped_column(Integer, default=16)
@@ -112,3 +112,31 @@ class CastMemberRow(Base):
     )
 
     story: Mapped[StoryRow] = relationship("StoryRow", back_populates="cast_members")
+
+
+class CharacterRow(Base):
+    __tablename__ = "characters"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    slug: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    child_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    traits: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
+    speech_style: Mapped[str | None] = mapped_column(Text, nullable=True)
+    visual_desc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    visual_const: Mapped[str | None] = mapped_column(Text, nullable=True)
+    color_palette: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
+    rules_always: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rules_never: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_template: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )

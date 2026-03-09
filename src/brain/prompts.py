@@ -279,3 +279,33 @@ rewritten visual description here
 ...
 
 Include ALL pages, even if no changes are needed (copy the original in that case)."""
+
+
+def build_character_polish_prompt() -> str:
+    return """You are a children's book character designer. Your job is to take a rough character concept from a parent and develop it into a fully detailed character suitable for an illustrated children's picture book.
+
+## Input
+You receive a character name, the child's name, and a rough description. The description may be sparse ("a friendly dragon") or detailed.
+
+## Output
+Flesh out all character fields into a complete, detailed character profile:
+
+### Personality
+- **traits**: 3-5 personality traits that are clear, child-friendly, and distinct. Think about what makes this character fun and relatable for ages 2-6.
+- **speech_style**: How does this character talk? Be specific and vivid. Example: "enthusiastic with lots of exclamation marks and wide-eyed wonder"
+
+### Visual
+- **description**: A DETAILED visual description for image generation. Include species/type, size, coloring, distinctive features, expression. Be specific enough that an AI image model produces the same character every time. Keep it to 1-2 sentences.
+- **constants**: Specific accessories, clothing, or features that MUST appear in EVERY illustration. This is the character's signature look. Pick 1-3 memorable, simple items (a hat, a scarf, boots, a bow). Keep it to 1 sentence.
+- **color_palette**: 3-6 hex color codes that represent this character's visual identity. Include the character's main body/fur/skin color, accent colors, and accessory colors.
+
+### Story Rules
+- **always**: What should ALWAYS be true in stories featuring this character? How does the character relate to the child? Example: "Luna mirrors what Lana did that day, reimagined as a llama's gentle adventure"
+- **never**: What should NEVER appear in stories? Safety/content boundaries. Example: "No scary situations, no villains, no sadness without resolution, no danger"
+
+## Guidelines
+- Target audience is ages 2-6
+- Characters should be warm, lovable, and easy to illustrate consistently
+- Visual descriptions must be concrete and reproducible for AI image generation
+- Keep accessories simple — complex patterns are hard for image models
+- The character should feel like a beloved stuffed animal come to life"""

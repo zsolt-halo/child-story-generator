@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { getCharacters, getStyles, getNarrators, startStoryOnly } from "../api/client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { listAllCharacters, getStyles, getNarrators, startStoryOnly, createCharacter, duplicateTemplate } from "../api/client";
+import type { CharacterCreateRequest } from "../api/types";
 import { PickerCard } from "../components/PickerCard";
+import { CharacterEditor } from "../components/CharacterEditor";
 import { usePipelineStore } from "../stores/pipelineStore";
 
 const STEPS = ["Notes", "Character", "Style & Narrator", "Settings"];
@@ -32,13 +34,33 @@ export function NewStory() {
   const [language, setLanguage] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  const { data: characters } = useQuery({ queryKey: ["characters"], queryFn: getCharacters });
+  const [creatingCharacter, setCreatingCharacter] = useState(false);
+  const queryClient = useQueryClient();
+
+  const { data: characters } = useQuery({ queryKey: ["all-characters"], queryFn: listAllCharacters });
   const { data: styles } = useQuery({ queryKey: ["styles"], queryFn: getStyles });
   const { data: narrators } = useQuery({ queryKey: ["narrators"], queryFn: getNarrators });
 
+  const createMutation = useMutation({
+    mutationFn: createCharacter,
+    onSuccess: (newChar) => {
+      queryClient.invalidateQueries({ queryKey: ["all-characters"] });
+      setCharacter(newChar.pipeline_id);
+      setCreatingCharacter(false);
+    },
+  });
+
+  const duplicateMutation = useMutation({
+    mutationFn: duplicateTemplate,
+    onSuccess: (newChar) => {
+      queryClient.invalidateQueries({ queryKey: ["all-characters"] });
+      setCharacter(newChar.pipeline_id);
+    },
+  });
+
   // Auto-select first character
   if (characters && characters.length > 0 && !character) {
-    setCharacter(characters[0].slug);
+    setCharacter(characters[0].pipeline_id);
   }
 
   const canProceed = () => {
@@ -124,16 +146,76 @@ export function NewStory() {
             <p className="text-sm text-bark-400 mb-4">Pick the protagonist for this story</p>
             <div className="grid grid-cols-1 gap-3">
               {characters?.map((c) => (
-                <PickerCard
-                  key={c.slug}
-                  selected={character === c.slug}
-                  onClick={() => setCharacter(c.slug)}
-                  title={c.name}
-                  subtitle={`for ${c.child_name}`}
-                  description={c.description}
-                />
+                <div key={c.pipeline_id} className="relative">
+                  <PickerCard
+                    selected={character === c.pipeline_id}
+                    onClick={() => setCharacter(c.pipeline_id)}
+                    title={c.name}
+                    subtitle={`for ${c.child_name}`}
+                    description={c.visual.description}
+                    icon={
+                      c.is_template ? (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-bark-100 text-bark-500 uppercase tracking-wide">
+                          Template
+                        </span>
+                      ) : undefined
+                    }
+                  />
+                  {/* Personality traits */}
+                  {c.personality.traits.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1.5 ml-1">
+                      {c.personality.traits.slice(0, 5).map((trait) => (
+                        <span
+                          key={trait}
+                          className="inline-block px-2 py-0.5 bg-amber-50 text-amber-700 text-[10px] font-medium rounded-full"
+                        >
+                          {trait}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {/* Customize button for templates */}
+                  {c.is_template && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        duplicateMutation.mutate(c.slug);
+                      }}
+                      disabled={duplicateMutation.isPending}
+                      className="absolute top-3 right-3 text-[11px] font-medium text-amber-600 hover:text-amber-800 underline underline-offset-2 transition-colors"
+                    >
+                      {duplicateMutation.isPending ? "Customizing..." : "Customize"}
+                    </button>
+                  )}
+                </div>
               ))}
             </div>
+
+            {/* Create Custom Character */}
+            {!creatingCharacter ? (
+              <button
+                type="button"
+                onClick={() => setCreatingCharacter(true)}
+                className="mt-4 w-full px-4 py-3 text-sm font-medium text-bark-500 bg-bark-50 hover:bg-bark-100 border border-dashed border-bark-300 rounded-[var(--radius-card)] transition-colors"
+              >
+                + Create Custom Character
+              </button>
+            ) : (
+              <div className="mt-4 border border-bark-200 rounded-[var(--radius-card)] p-4 bg-cream/50">
+                <h3 className="text-sm font-bold text-bark-700 mb-4">New Character</h3>
+                <CharacterEditor
+                  mode="create"
+                  onSave={(data: CharacterCreateRequest) => createMutation.mutate(data)}
+                  onCancel={() => setCreatingCharacter(false)}
+                />
+                {createMutation.isError && (
+                  <p className="text-xs text-red-600 mt-2">
+                    {createMutation.error instanceof Error ? createMutation.error.message : "Failed to create character"}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -216,7 +298,7 @@ export function NewStory() {
               <h3 className="font-semibold text-bark-700">Summary</h3>
               <div className="grid grid-cols-2 gap-2 text-bark-600">
                 <span className="text-bark-400">Character:</span>
-                <span>{characters?.find((c) => c.slug === character)?.name ?? character}</span>
+                <span>{characters?.find((c) => c.pipeline_id === character)?.name ?? character}</span>
                 <span className="text-bark-400">Style:</span>
                 <span className="capitalize">{style}</span>
                 <span className="text-bark-400">Narrator:</span>

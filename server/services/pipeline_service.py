@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from src.models import BookConfig, Story
-from src.utils.config import build_config, load_character, load_style
+from src.utils.config import build_config, load_style, async_resolve_character
 from src.utils.io import slugify
 
 from server.services.task_manager import task_manager
@@ -44,7 +44,7 @@ async def run_full_pipeline(
 ) -> dict:
     """Run the full pipeline: story → keyframes → translation → illustrations → backdrops → PDF."""
     config = build_config(character=character, narrator=narrator, style=style, pages=pages)
-    char = load_character(config.character)
+    char = await async_resolve_character(config.character)
     style_data = load_style(config.style)
     style_desc = style_data["description"]
     style_anchor = style_data.get("anchor", style_desc)
@@ -205,7 +205,7 @@ async def run_story_only(
 ) -> dict:
     """Run Phase 1+2 only (story + keyframes)."""
     config = build_config(character=character, narrator=narrator, style=style, pages=pages)
-    char = load_character(config.character)
+    char = await async_resolve_character(config.character)
     style_data = load_style(config.style)
     style_desc = style_data["description"]
 
@@ -271,7 +271,7 @@ async def run_cast_extraction(task_id: str, slug: str) -> dict:
     from server.services.story_service import get_story
     story, image_paths, story_dir = await get_story(slug)
     config, _ = await _config_from_metadata(slug)
-    char = load_character(config.character)
+    char = await async_resolve_character(config.character)
 
     await task_manager.broadcast(task_id, {
         "type": "phase_start", "phase": "cast",
@@ -317,7 +317,7 @@ async def run_illustrate(task_id: str, slug: str, page_number: int | None = None
     config, _ = await _config_from_metadata(slug)
     style_data = load_style(config.style)
     style_anchor = style_data.get("anchor", style_data["description"])
-    char = load_character(config.character)
+    char = await async_resolve_character(config.character)
 
     from src.artist.generator import (
         build_image_prompt, create_image_client, generate_single_image, upscale_for_print,
@@ -407,7 +407,7 @@ async def run_continue_pipeline(task_id: str, slug: str) -> dict:
     config, meta = await _config_from_metadata(slug)
     style_data = load_style(config.style)
     style_anchor = style_data.get("anchor", style_data["description"])
-    char = load_character(config.character)
+    char = await async_resolve_character(config.character)
     language = meta["config"].get("language") if meta and meta.get("config") else None
 
     # Phase 2b: Translation (if language configured and not already done)

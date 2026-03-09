@@ -139,3 +139,52 @@ export interface SanityCheckResult {
   issues: SanityIssue[];
   suggested_visual_description: string | null;
 }
+
+export interface CharacterPersonality {
+  traits: string[];
+  speech_style: string;
+}
+
+export interface CharacterVisual {
+  description: string;
+  constants: string;
+  color_palette: string[];
+}
+
+export interface CharacterStoryRules {
+  always: string;
+  never: string;
+}
+
+export interface CharacterDetail {
+  id: string | null;
+  slug: string;
+  name: string;
+  child_name: string;
+  personality: CharacterPersonality;
+  visual: CharacterVisual;
+  story_rules: CharacterStoryRules;
+  is_template: boolean;
+  pipeline_id: string;
+}
+
+export interface CharacterCreateRequest {
+  slug: string;
+  name: string;
+  child_name: string;
+  personality: CharacterPersonality;
+  visual: CharacterVisual;
+  story_rules: CharacterStoryRules;
+}
+
+export interface CharacterPolishRequest {
+  name: string;
+  child_name: string;
+  rough_description: string;
+}
+
+export interface CharacterPolishResponse {
+  personality: CharacterPersonality;
+  visual: CharacterVisual;
+  story_rules: CharacterStoryRules;
+}
