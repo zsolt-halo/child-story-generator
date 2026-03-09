@@ -47,6 +47,7 @@ COPY main.py ./
 COPY configs/ ./configs/
 COPY alembic.ini ./
 COPY alembic/ ./alembic/
+COPY scripts/ ./scripts/
 
 # Stories directory (overlaid by PVC in k8s)
 RUN mkdir -p /app/stories
