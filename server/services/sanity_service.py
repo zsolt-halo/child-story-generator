@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import shutil
@@ -5,7 +7,6 @@ from pathlib import Path
 
 from src.brain.client import generate_multimodal
 from src.utils.config import build_config, load_character, load_style
-from src.utils.io import load_checkpoint, save_checkpoint
 from server.schemas import SanityCheckResult, SanityIssue
 from server.services.task_manager import task_manager
 
@@ -44,9 +45,18 @@ async def check_single_page(
     page_number: int,
 ) -> SanityCheckResult:
     """Run sanity check on a single page's illustration."""
+    from server.services.story_service import get_story, get_metadata
+
     story_dir = Path("stories") / slug
-    story, image_paths = load_checkpoint(story_dir)
-    config = build_config()
+    story, image_paths, _ = await get_story(slug)
+    meta = await get_metadata(slug)
+    config_meta = meta.get("config", {}) if meta else {}
+    config = build_config(
+        character=config_meta.get("character"),
+        narrator=config_meta.get("narrator"),
+        style=config_meta.get("style"),
+        pages=config_meta.get("pages"),
+    ) if config_meta else build_config()
     char = load_character(config.character)
 
     kf = next((k for k in story.keyframes if k.page_number == page_number), None)
@@ -121,8 +131,10 @@ Analyze the image and report any discrepancies."""
 
 async def check_all_pages(task_id: str, slug: str) -> dict:
     """Run sanity check on all illustrations."""
+    from server.services.story_service import get_story
+
     story_dir = Path("stories") / slug
-    story, _ = load_checkpoint(story_dir)
+    story, _, _ = await get_story(slug)
 
     results = []
     total = len(story.keyframes)
@@ -167,14 +179,22 @@ async def check_all_pages(task_id: str, slug: str) -> dict:
 
 async def auto_fix_page(task_id: str, slug: str, page_number: int) -> dict:
     """Auto-fix a flagged illustration by updating the visual description and regenerating."""
+    from server.services.story_service import get_story, save_to_db, get_metadata
+
     # First run sanity check to get the suggested fix
     result = await check_single_page(slug, page_number)
     if not result.suggested_visual_description:
         raise ValueError("No auto-fix suggestion available for this page")
 
-    story_dir = Path("stories") / slug
-    story, image_paths = load_checkpoint(story_dir)
-    config = build_config()
+    story, image_paths, story_dir = await get_story(slug)
+    meta = await get_metadata(slug)
+    config_meta = meta.get("config", {}) if meta else {}
+    config = build_config(
+        character=config_meta.get("character"),
+        narrator=config_meta.get("narrator"),
+        style=config_meta.get("style"),
+        pages=config_meta.get("pages"),
+    ) if config_meta else build_config()
     char = load_character(config.character)
     style_data = load_style(config.style)
     style_anchor = style_data.get("anchor", style_data["description"])
@@ -198,7 +218,7 @@ async def auto_fix_page(task_id: str, slug: str, page_number: int) -> dict:
 
     # Update visual description
     kf.visual_description = result.suggested_visual_description
-    save_checkpoint(story_dir, story, [str(p) for p in image_paths])
+    await save_to_db(slug, story, [str(p) for p in image_paths])
 
     await task_manager.broadcast(task_id, {
         "type": "phase_start", "phase": "auto_fix",

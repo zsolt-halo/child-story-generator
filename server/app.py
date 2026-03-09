@@ -1,5 +1,6 @@
 import os
 import platform
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -18,10 +19,27 @@ from server.routers import stories, pipeline, config, sanity
 
 load_dotenv()
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Run DB table creation as a dev safety net on startup."""
+    try:
+        from src.db.engine import get_async_engine
+        from src.db.models import Base
+        engine = get_async_engine()
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+    except Exception:
+        # DB not configured — skip (CLI-only or dev without PG)
+        pass
+    yield
+
+
 app = FastAPI(
     title="StarlightScribe",
     description="Children's book generator API",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 _default_origins = ["http://localhost:5173", "http://127.0.0.1:5173"]

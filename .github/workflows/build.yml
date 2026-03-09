@@ -36,8 +36,11 @@ jobs:
               - 'src/**'
               - 'server/**'
               - 'configs/**'
+              - 'alembic/**'
+              - 'scripts/**'
               - 'main.py'
               - 'pyproject.toml'
+              - 'alembic.ini'
               - 'Dockerfile'
             frontend:
               - 'web/**'

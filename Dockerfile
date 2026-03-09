@@ -8,6 +8,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libffi-dev \
+    libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml ./
@@ -31,6 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcairo2 \
     ghostscript \
     libffi8 \
+    libpq5 \
     fonts-noto \
     && rm -rf /var/lib/apt/lists/*
 
@@ -43,6 +45,8 @@ COPY src/ ./src/
 COPY server/ ./server/
 COPY main.py ./
 COPY configs/ ./configs/
+COPY alembic.ini ./
+COPY alembic/ ./alembic/
 
 # Stories directory (overlaid by PVC in k8s)
 RUN mkdir -p /app/stories

@@ -10,6 +10,9 @@ resources:
   # Note: Create secrets.yml from secrets.yml.example before deploying
   # - secrets.yml
   - stories-pvc.yml
+  - postgres-pvc.yml
+  - postgres-statefulset.yml
+  - postgres-service.yml
   - deployment.yml
   - service.yml
   - frontend-deployment.yml

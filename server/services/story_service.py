@@ -1,76 +1,32 @@
+from __future__ import annotations
+
 import shutil
 from datetime import datetime
 from pathlib import Path
 
 from src.models import Story, CastMember
-from src.utils.io import load_checkpoint, save_checkpoint, load_metadata, CHECKPOINT_FILE
+from src.db.repository import StoryRepository
 from server.schemas import StoryListItem
 
 
 STORIES_DIR = Path("stories")
+_repo = StoryRepository()
 
 
-def list_stories() -> list[StoryListItem]:
-    """Scan stories directory and return metadata for each story."""
-    items = []
-    if not STORIES_DIR.exists():
-        return items
-
-    for story_dir in sorted(STORIES_DIR.iterdir()):
-        checkpoint = story_dir / CHECKPOINT_FILE
-        if not checkpoint.exists():
-            continue
-
-        try:
-            story, image_paths = load_checkpoint(story_dir)
-        except Exception:
-            continue
-
-        images_dir = story_dir / "images"
-        has_images = images_dir.exists() and any(images_dir.glob("*.png"))
-        has_pdf = (story_dir / "book.pdf").exists()
-
-        cover_url = None
-        cover_kf = next((kf for kf in story.keyframes if kf.is_cover), None)
-        if cover_kf:
-            cover_path = images_dir / "cover.png"
-            if cover_path.exists():
-                cover_url = f"/api/stories/{story_dir.name}/images/cover.png"
-
-        created_at = None
-        try:
-            created_at = datetime.fromtimestamp(checkpoint.stat().st_mtime).isoformat()
-        except Exception:
-            pass
-
-        meta = load_metadata(story_dir)
-        parent_slug = meta.get("parent_slug") if meta else None
-
-        items.append(StoryListItem(
-            slug=story_dir.name,
-            title=story.title,
-            page_count=len(story.keyframes),
-            has_images=has_images,
-            has_pdf=has_pdf,
-            cover_url=cover_url,
-            created_at=created_at,
-            title_translated=story.title_translated,
-            parent_slug=parent_slug,
-        ))
-
-    return items
+async def list_stories() -> list[StoryListItem]:
+    """Return metadata for each story from the database."""
+    items = await _repo.async_list()
+    return [StoryListItem(**item) for item in items]
 
 
-def get_story(slug: str) -> tuple[Story, list[Path], Path]:
+async def get_story(slug: str) -> tuple[Story, list[Path], Path]:
     """Load a story by slug. Returns (story, image_paths, story_dir)."""
+    story, image_paths = await _repo.async_get(slug)
     story_dir = STORIES_DIR / slug
-    if not (story_dir / CHECKPOINT_FILE).exists():
-        raise FileNotFoundError(f"Story not found: {slug}")
-    story, image_paths = load_checkpoint(story_dir)
     return story, image_paths, story_dir
 
 
-def update_story(
+async def update_story(
     slug: str,
     title: str | None,
     dedication: str | None,
@@ -78,35 +34,21 @@ def update_story(
     cast_updates: list[dict] | None = None,
 ) -> Story:
     """Update story fields and save."""
-    story, image_paths, story_dir = get_story(slug)
-
-    if title is not None:
-        story.title = title
-    if dedication is not None:
-        story.dedication = dedication
-    if keyframe_updates:
-        for kf in story.keyframes:
-            if kf.page_number in keyframe_updates:
-                updates = keyframe_updates[kf.page_number]
-                if "page_text" in updates and updates["page_text"] is not None:
-                    kf.page_text = updates["page_text"]
-                if "visual_description" in updates and updates["visual_description"] is not None:
-                    kf.visual_description = updates["visual_description"]
-                if "mood" in updates and updates["mood"] is not None:
-                    kf.mood = updates["mood"]
-    if cast_updates is not None:
-        story.cast = [CastMember(**c) for c in cast_updates]
-
-    save_checkpoint(story_dir, story, [str(p) for p in image_paths])
-    return story
+    return await _repo.async_update(
+        slug,
+        title=title,
+        dedication=dedication,
+        keyframe_updates=keyframe_updates,
+        cast_updates=cast_updates,
+    )
 
 
-def delete_story(slug: str):
-    """Delete a story directory."""
+async def delete_story(slug: str):
+    """Delete a story from DB and disk."""
+    await _repo.async_delete(slug)
     story_dir = STORIES_DIR / slug
-    if not story_dir.exists():
-        raise FileNotFoundError(f"Story not found: {slug}")
-    shutil.rmtree(story_dir)
+    if story_dir.exists():
+        shutil.rmtree(story_dir)
 
 
 def get_story_dir(slug: str) -> Path:
@@ -117,15 +59,30 @@ def get_story_dir(slug: str) -> Path:
     return story_dir
 
 
-def branch_story(source_slug: str, new_config: dict, start_from: str) -> tuple[str, Path, str]:
+async def save_to_db(
+    slug: str,
+    story: Story,
+    image_paths: list[str | Path] | None = None,
+    metadata: dict | None = None,
+) -> None:
+    """Save/update a story in the database (async wrapper for pipeline use)."""
+    await _repo.async_save(slug, story, image_paths=image_paths, metadata=metadata)
+
+
+async def get_metadata(slug: str) -> dict | None:
+    """Load metadata for a story from the database."""
+    return await _repo.async_get_metadata(slug)
+
+
+async def branch_story(source_slug: str, new_config: dict, start_from: str) -> tuple[str, Path, str]:
     """Clone a story with new config. Returns (new_slug, new_dir, notes).
 
     start_from: "full" = regenerate everything, "illustration" = keep story, new illustrations.
     """
     from src.utils.io import slugify
 
-    story, image_paths, source_dir = get_story(source_slug)
-    meta = load_metadata(source_dir)
+    story, image_paths, source_dir = await get_story(source_slug)
+    meta = await get_metadata(source_slug)
     if not meta or not meta.get("notes"):
         raise ValueError("Source story has no metadata/notes — cannot branch")
 
@@ -173,11 +130,9 @@ def branch_story(source_slug: str, new_config: dict, start_from: str) -> tuple[s
             branched_story.dedication_translated = None
             for kf in branched_story.keyframes:
                 kf.page_text_translated = None
-        save_checkpoint(new_dir, branched_story, metadata=new_metadata)
+        await save_to_db(new_slug, branched_story, metadata=new_metadata)
     else:
-        # "full" — empty story placeholder, will be regenerated
-        # We need a minimal story to have a valid checkpoint
-        # Actually for full, we don't save a checkpoint — the pipeline will create it
+        # "full" — the pipeline will create the DB entry
         pass
 
     return new_slug, new_dir, notes

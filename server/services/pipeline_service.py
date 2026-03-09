@@ -1,18 +1,26 @@
+from __future__ import annotations
+
 import asyncio
-import time
 from datetime import datetime
 from pathlib import Path
 
 from src.models import BookConfig, Story
 from src.utils.config import build_config, load_character, load_style
-from src.utils.io import slugify, save_checkpoint, load_metadata
+from src.utils.io import slugify
 
 from server.services.task_manager import task_manager
 
 
-def _config_from_metadata(story_dir: Path) -> tuple[BookConfig, dict | None]:
-    """Load config from checkpoint metadata, falling back to settings.toml defaults."""
-    meta = load_metadata(story_dir)
+async def _save(slug: str, story: Story, image_paths: list[str | Path] | None = None, metadata: dict | None = None):
+    """Save story to DB via story_service."""
+    from server.services.story_service import save_to_db
+    await save_to_db(slug, story, image_paths=image_paths, metadata=metadata)
+
+
+async def _config_from_metadata(slug: str) -> tuple[BookConfig, dict | None]:
+    """Load config from DB metadata, falling back to settings.toml defaults."""
+    from server.services.story_service import get_metadata
+    meta = await get_metadata(slug)
     if meta and meta.get("config"):
         mc = meta["config"]
         config = build_config(
@@ -77,8 +85,8 @@ async def run_full_pipeline(
         "parent_slug": None,
         "created_at": datetime.now().isoformat(),
     }
-    save_checkpoint(output_dir, story, metadata=metadata)
     slug = output_dir.name
+    await _save(slug, story, metadata=metadata)
 
     # Phase 2.5: Cast Extraction
     if not story.cast:
@@ -88,7 +96,7 @@ async def run_full_pipeline(
         })
         from src.brain.cast_extractor import extract_cast
         story = await asyncio.to_thread(extract_cast, story, char, config)
-        save_checkpoint(output_dir, story)
+        await _save(slug, story)
         await task_manager.broadcast(task_id, {
             "type": "phase_complete", "phase": "cast",
             "data": {"cast_count": len(story.cast), "members": [m.model_dump() for m in story.cast]},
@@ -101,7 +109,7 @@ async def run_full_pipeline(
         })
         from src.brain.translator import translate_story
         story = await asyncio.to_thread(translate_story, story, language, config)
-        save_checkpoint(output_dir, story)
+        await _save(slug, story)
         await task_manager.broadcast(task_id, {
             "type": "phase_complete", "phase": "translation",
             "data": {"translated_title": story.title_translated},
@@ -153,7 +161,7 @@ async def run_full_pipeline(
         if i < len(story.keyframes) - 1:
             await asyncio.sleep(2.0)
 
-    save_checkpoint(output_dir, story, [str(p) for p in image_paths])
+    await _save(slug, story, [str(p) for p in image_paths])
     await task_manager.broadcast(task_id, {
         "type": "phase_complete", "phase": "illustration",
     })
@@ -221,7 +229,9 @@ async def run_story_only(
         "data": {"page_count": len(story.keyframes)},
     })
 
-    output_dir = Path("stories") / (output_slug or slugify(story.title))
+    slug = output_slug or slugify(story.title)
+    output_dir = Path("stories") / slug
+    output_dir.mkdir(parents=True, exist_ok=True)
     metadata = {
         "notes": notes,
         "config": {
@@ -234,7 +244,7 @@ async def run_story_only(
         "parent_slug": parent_slug,
         "created_at": datetime.now().isoformat(),
     }
-    save_checkpoint(output_dir, story, metadata=metadata)
+    await _save(slug, story, metadata=metadata)
 
     # Phase 2.5: Cast Extraction
     if not story.cast:
@@ -244,7 +254,7 @@ async def run_story_only(
         })
         from src.brain.cast_extractor import extract_cast
         story = await asyncio.to_thread(extract_cast, story, char, config)
-        save_checkpoint(output_dir, story)
+        await _save(slug, story)
         await task_manager.broadcast(task_id, {
             "type": "phase_complete", "phase": "cast",
             "data": {
@@ -253,14 +263,14 @@ async def run_story_only(
             },
         })
 
-    return {"slug": output_dir.name, "title": story.title}
+    return {"slug": slug, "title": story.title}
 
 
 async def run_cast_extraction(task_id: str, slug: str) -> dict:
     """Run cast extraction on an existing story."""
     from server.services.story_service import get_story
-    story, image_paths, story_dir = get_story(slug)
-    config, _ = _config_from_metadata(story_dir)
+    story, image_paths, story_dir = await get_story(slug)
+    config, _ = await _config_from_metadata(slug)
     char = load_character(config.character)
 
     await task_manager.broadcast(task_id, {
@@ -271,7 +281,7 @@ async def run_cast_extraction(task_id: str, slug: str) -> dict:
     # Clear existing cast to force re-extraction
     story.cast = []
     story = await asyncio.to_thread(extract_cast, story, char, config)
-    save_checkpoint(story_dir, story, [str(p) for p in image_paths])
+    await _save(slug, story, [str(p) for p in image_paths])
     await task_manager.broadcast(task_id, {
         "type": "phase_complete", "phase": "cast",
         "data": {"cast_count": len(story.cast), "members": [m.model_dump() for m in story.cast]},
@@ -283,15 +293,15 @@ async def run_cast_extraction(task_id: str, slug: str) -> dict:
 async def run_translate(task_id: str, slug: str, language: str) -> dict:
     """Run translation on an existing story."""
     from server.services.story_service import get_story
-    story, image_paths, story_dir = get_story(slug)
-    config, _ = _config_from_metadata(story_dir)
+    story, image_paths, story_dir = await get_story(slug)
+    config, _ = await _config_from_metadata(slug)
 
     await task_manager.broadcast(task_id, {
         "type": "phase_start", "phase": "translation", "message": f"Translating to {language}..."
     })
     from src.brain.translator import translate_story
     story = await asyncio.to_thread(translate_story, story, language, config)
-    save_checkpoint(story_dir, story, [str(p) for p in image_paths])
+    await _save(slug, story, [str(p) for p in image_paths])
     await task_manager.broadcast(task_id, {
         "type": "phase_complete", "phase": "translation",
         "data": {"translated_title": story.title_translated},
@@ -303,8 +313,8 @@ async def run_translate(task_id: str, slug: str, language: str) -> dict:
 async def run_illustrate(task_id: str, slug: str, page_number: int | None = None) -> dict:
     """Run illustration on an existing story. If page_number given, regenerate only that page."""
     from server.services.story_service import get_story
-    story, image_paths, story_dir = get_story(slug)
-    config, _ = _config_from_metadata(story_dir)
+    story, image_paths, story_dir = await get_story(slug)
+    config, _ = await _config_from_metadata(slug)
     style_data = load_style(config.style)
     style_anchor = style_data.get("anchor", style_data["description"])
     char = load_character(config.character)
@@ -357,9 +367,9 @@ async def run_illustrate(task_id: str, slug: str, page_number: int | None = None
         if i < len(keyframes) - 1:
             await asyncio.sleep(2.0)
 
-    # Update image_paths in checkpoint
+    # Update image_paths in DB
     if page_number is None:
-        save_checkpoint(story_dir, story, [str(p) for p in new_paths])
+        await _save(slug, story, [str(p) for p in new_paths])
 
     await task_manager.broadcast(task_id, {
         "type": "phase_complete", "phase": "illustration",
@@ -372,7 +382,7 @@ async def run_backdrops(task_id: str, slug: str) -> dict:
     """Generate backdrops for an existing story."""
     from server.services.story_service import get_story_dir
     story_dir = get_story_dir(slug)
-    config, _ = _config_from_metadata(story_dir)
+    config, _ = await _config_from_metadata(slug)
     style_data = load_style(config.style)
     style_anchor = style_data.get("anchor", style_data["description"])
 
@@ -393,8 +403,8 @@ async def run_backdrops(task_id: str, slug: str) -> dict:
 async def run_continue_pipeline(task_id: str, slug: str) -> dict:
     """Continue pipeline after cast review: translate → illustrate → backdrops → PDF."""
     from server.services.story_service import get_story
-    story, image_paths, story_dir = get_story(slug)
-    config, meta = _config_from_metadata(story_dir)
+    story, image_paths, story_dir = await get_story(slug)
+    config, meta = await _config_from_metadata(slug)
     style_data = load_style(config.style)
     style_anchor = style_data.get("anchor", style_data["description"])
     char = load_character(config.character)
@@ -408,7 +418,7 @@ async def run_continue_pipeline(task_id: str, slug: str) -> dict:
         })
         from src.brain.translator import translate_story
         story = await asyncio.to_thread(translate_story, story, language, config)
-        save_checkpoint(story_dir, story, [str(p) for p in image_paths])
+        await _save(slug, story, [str(p) for p in image_paths])
         await task_manager.broadcast(task_id, {
             "type": "phase_complete", "phase": "translation",
             "data": {"translated_title": story.title_translated},
@@ -460,7 +470,7 @@ async def run_continue_pipeline(task_id: str, slug: str) -> dict:
         if i < len(story.keyframes) - 1:
             await asyncio.sleep(2.0)
 
-    save_checkpoint(story_dir, story, [str(p) for p in new_image_paths])
+    await _save(slug, story, [str(p) for p in new_image_paths])
     await task_manager.broadcast(task_id, {
         "type": "phase_complete", "phase": "illustration",
     })
@@ -494,7 +504,7 @@ async def run_continue_pipeline(task_id: str, slug: str) -> dict:
 async def run_pdf(task_id: str, slug: str) -> dict:
     """Render PDFs for an existing story."""
     from server.services.story_service import get_story
-    story, image_paths, story_dir = get_story(slug)
+    story, image_paths, story_dir = await get_story(slug)
 
     # Discover backdrops
     backdrops_dir = story_dir / "backdrops"

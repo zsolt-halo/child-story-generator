@@ -101,7 +101,7 @@ async def start_branch(slug: str, req: BranchRequest):
     """Create a story branch with different config."""
     from server.services.story_service import branch_story
 
-    new_slug, new_dir, notes = branch_story(
+    new_slug, new_dir, notes = await branch_story(
         source_slug=slug,
         new_config=req.model_dump(exclude={"start_from"}),
         start_from=req.start_from,

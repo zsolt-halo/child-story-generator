@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -5,22 +7,21 @@ from fastapi.responses import FileResponse
 
 from server.schemas import StoryListItem, StoryUpdate
 from server.services.story_service import (
-    list_stories, get_story, update_story, delete_story, get_story_dir,
+    list_stories, get_story, update_story, delete_story, get_story_dir, get_metadata,
 )
-from src.utils.io import load_metadata
 
 router = APIRouter(prefix="/api/stories", tags=["stories"])
 
 
 @router.get("/", response_model=list[StoryListItem])
 async def list_all_stories():
-    return list_stories()
+    return await list_stories()
 
 
 @router.get("/{slug}")
 async def get_story_detail(slug: str):
     try:
-        story, image_paths, story_dir = get_story(slug)
+        story, image_paths, story_dir = await get_story(slug)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Story not found")
 
@@ -39,7 +40,7 @@ async def get_story_detail(slug: str):
             if "_raw" not in p.name:
                 backdrop_urls.append(f"/api/stories/{slug}/images/../backdrops/{p.name}")
 
-    metadata = load_metadata(story_dir)
+    metadata = await get_metadata(slug)
 
     return {
         "slug": slug,
@@ -62,7 +63,7 @@ async def update_story_detail(slug: str, update: StoryUpdate):
         cast_list = None
         if update.cast is not None:
             cast_list = [c.model_dump() for c in update.cast]
-        story = update_story(slug, update.title, update.dedication, keyframe_dict, cast_list)
+        story = await update_story(slug, update.title, update.dedication, keyframe_dict, cast_list)
         return {"status": "ok", "story": story.model_dump()}
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Story not found")
@@ -71,7 +72,7 @@ async def update_story_detail(slug: str, update: StoryUpdate):
 @router.delete("/{slug}")
 async def delete_story_endpoint(slug: str):
     try:
-        delete_story(slug)
+        await delete_story(slug)
         return {"status": "ok"}
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Story not found")

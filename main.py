@@ -8,8 +8,9 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 
+from src.models import Story
 from src.utils.config import build_config, load_character, load_style
-from src.utils.io import slugify, save_checkpoint, load_checkpoint, load_metadata, CHECKPOINT_FILE
+from src.utils.io import slugify
 
 load_dotenv()
 
@@ -26,6 +27,12 @@ elif platform.system() == "Windows":
         os.environ["PATH"] = msys2_bin + os.pathsep + os.environ.get("PATH", "")
 
 console = Console()
+
+
+def _get_repo():
+    """Lazy-import repository to avoid DB connection when not needed."""
+    from src.db.repository import StoryRepository
+    return StoryRepository()
 
 
 @click.group()
@@ -56,9 +63,11 @@ def generate(notes_file: Path, character: str, narrator: str, style: str, pages:
         console.print("[red]Error: Notes file is empty.[/red]")
         raise SystemExit(1)
 
+    repo = _get_repo()
     story = None
     image_paths = []
     output_dir = None
+    slug = None
 
     # Try to resume from checkpoint
     if resume:
@@ -66,12 +75,19 @@ def generate(notes_file: Path, character: str, narrator: str, style: str, pages:
         candidates = sorted(config.output.glob("*/story.json"), key=lambda p: p.stat().st_mtime, reverse=True)
         if candidates:
             output_dir = candidates[0].parent
-            story, image_paths = load_checkpoint(output_dir)
-            console.print(f"[yellow]Resuming from:[/yellow] {output_dir}")
-            console.print(f"[yellow]Story:[/yellow] {story.title} ({len(story.keyframes)} pages)")
-            if image_paths:
-                existing = [p for p in image_paths if p.exists()]
-                console.print(f"[yellow]Images:[/yellow] {len(existing)}/{len(image_paths)} already generated\n")
+            slug = output_dir.name
+            try:
+                story, image_paths = repo.get(slug)
+                console.print(f"[yellow]Resuming from:[/yellow] {output_dir}")
+                console.print(f"[yellow]Story:[/yellow] {story.title} ({len(story.keyframes)} pages)")
+                if image_paths:
+                    existing = [p for p in image_paths if p.exists()]
+                    console.print(f"[yellow]Images:[/yellow] {len(existing)}/{len(image_paths)} already generated\n")
+            except FileNotFoundError:
+                # DB doesn't have it — try JSON fallback for migration period
+                from src.utils.io import load_checkpoint
+                story, image_paths = load_checkpoint(output_dir)
+                console.print(f"[yellow]Resuming from JSON checkpoint:[/yellow] {output_dir}")
         else:
             console.print("[yellow]No checkpoint found, starting fresh.[/yellow]\n")
 
@@ -97,8 +113,9 @@ def generate(notes_file: Path, character: str, narrator: str, style: str, pages:
         if cover_kf:
             console.print(f"[green]Cover page:[/green] {cover_kf.page_number}\n")
 
-        # Save checkpoint after story + keyframes (with metadata for branching)
+        # Save to DB with metadata
         output_dir = config.output / slugify(story.title)
+        slug = output_dir.name
         from datetime import datetime
         metadata = {
             "notes": notes,
@@ -112,8 +129,8 @@ def generate(notes_file: Path, character: str, narrator: str, style: str, pages:
             "parent_slug": None,
             "created_at": datetime.now().isoformat(),
         }
-        save_checkpoint(output_dir, story, metadata=metadata)
-        console.print(f"[dim]Checkpoint saved to {output_dir / CHECKPOINT_FILE}[/dim]\n")
+        repo.save(slug, story, metadata=metadata)
+        console.print(f"[dim]Saved to database: {slug}[/dim]\n")
 
     # Phase 2.5: Cast Extraction (character consistency)
     if not story.cast:
@@ -126,10 +143,10 @@ def generate(notes_file: Path, character: str, narrator: str, style: str, pages:
         if story.cast:
             console.print(f"[green]Cast members:[/green] {len(story.cast)}")
             for member in story.cast:
-                pages = ", ".join(str(p) for p in member.appears_on_pages)
-                console.print(f"  [dim]{member.name}[/dim] ({member.species}) — pages {pages}")
-            save_checkpoint(output_dir, story)
-            console.print(f"[dim]Checkpoint updated with cast[/dim]\n")
+                pages_str = ", ".join(str(p) for p in member.appears_on_pages)
+                console.print(f"  [dim]{member.name}[/dim] ({member.species}) — pages {pages_str}")
+            repo.save(slug, story)
+            console.print(f"[dim]Database updated with cast[/dim]\n")
         else:
             console.print("[dim]No secondary characters found[/dim]\n")
 
@@ -142,8 +159,8 @@ def generate(notes_file: Path, character: str, narrator: str, style: str, pages:
             story = translate_story(story, language, config)
 
         console.print(f"[green]Translated title:[/green] {story.title_translated}")
-        save_checkpoint(output_dir, story)
-        console.print(f"[dim]Checkpoint updated with translation[/dim]\n")
+        repo.save(slug, story)
+        console.print(f"[dim]Database updated with translation[/dim]\n")
 
     images_dir = output_dir / "images"
 
@@ -163,8 +180,8 @@ def generate(notes_file: Path, character: str, narrator: str, style: str, pages:
             title=story.title, cast=story.cast or None,
         )
 
-    # Update checkpoint with image paths
-    save_checkpoint(output_dir, story, [str(p) for p in image_paths])
+    # Update DB with image paths
+    repo.save(slug, story, [str(p) for p in image_paths])
     console.print(f"[green]Images saved to:[/green] {images_dir}\n")
 
     # Phase 3b: Backdrops for text pages
@@ -211,19 +228,26 @@ def _render_pdf(story: Story, image_paths: list[Path], output_dir: Path, backdro
 @click.argument("story_dir", type=click.Path(exists=True, path_type=Path))
 @click.option("--language", "-l", default=None, help="Translate story text (e.g., hungarian, german, french)")
 def pdf(story_dir: Path, language: str):
-    """Render PDF from an existing story folder (with story.json + images)."""
-    checkpoint = story_dir / CHECKPOINT_FILE
-    if not checkpoint.exists():
-        console.print(f"[red]No {CHECKPOINT_FILE} found in {story_dir}.[/red]")
-        raise SystemExit(1)
+    """Render PDF from an existing story folder (with images)."""
+    slug = story_dir.name
+    repo = _get_repo()
 
-    story, image_paths = load_checkpoint(story_dir)
+    try:
+        story, image_paths = repo.get(slug)
+    except FileNotFoundError:
+        # Fallback to JSON checkpoint for migration period
+        from src.utils.io import load_checkpoint, CHECKPOINT_FILE
+        checkpoint = story_dir / CHECKPOINT_FILE
+        if not checkpoint.exists():
+            console.print(f"[red]Story not found in database or on disk: {slug}[/red]")
+            raise SystemExit(1)
+        story, image_paths = load_checkpoint(story_dir)
+
     console.print(f"[green]Story:[/green] {story.title} ({len(story.keyframes)} pages)")
 
     # Translate if requested and not already done
     if language and not story.title_translated:
-        from src.utils.config import build_config
-        meta = load_metadata(story_dir)
+        meta = repo.get_metadata(slug)
         if meta and meta.get("config"):
             mc = meta["config"]
             config = build_config(character=mc.get("character"), narrator=mc.get("narrator"),
@@ -236,7 +260,7 @@ def pdf(story_dir: Path, language: str):
             from src.brain.translator import translate_story
             story = translate_story(story, language, config)
         console.print(f"[green]Translated title:[/green] {story.title_translated}")
-        save_checkpoint(story_dir, story, [str(p) for p in image_paths])
+        repo.save(slug, story, [str(p) for p in image_paths])
     elif story.title_translated:
         console.print(f"[green]Translation:[/green] {story.title_translated}")
 

@@ -19,6 +19,16 @@ spec:
     spec:
       imagePullSecrets:
         - name: ghcr-secret
+      initContainers:
+        - name: alembic-migrate
+          image: ghcr.io/zsolt-halo/starlight-backend:latest
+          command: ["python", "-m", "alembic", "upgrade", "head"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: starlight-secrets
+                  key: database-url
       containers:
         - name: backend
           image: ghcr.io/zsolt-halo/starlight-backend:latest
@@ -30,6 +40,11 @@ spec:
                 secretKeyRef:
                   name: starlight-secrets
                   key: gemini-api-key
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: starlight-secrets
+                  key: database-url
             - name: CORS_ORIGINS
               valueFrom:
                 configMapKeyRef:
