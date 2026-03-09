@@ -1,37 +1,8 @@
 import re
 
 from src.brain.client import generate_text
+from src.brain.prompts import build_translator_system_prompt
 from src.models import BookConfig, Story
-
-_SYSTEM_PROMPT = """\
-You are an expert literary translator specializing in children's picture books.
-You translate with warmth, rhythm, and playfulness — preserving the tone, humor,
-sound effects, and emotional beats of the original.
-
-Rules:
-- Translate ALL text faithfully — do not add, remove, or summarize content.
-- Preserve made-up words and sound effects by creating equivalent ones in the target
-  language (e.g. "floomph" → a similarly playful onomatopoeia).
-- Keep proper names (character names, place names) unless there is a natural
-  equivalent that sounds better in the target language. Use your judgment.
-- Maintain the reading rhythm — a children's book is read aloud, so the
-  translation must flow naturally when spoken.
-- Match the approximate length of each page text (the text must fit the same
-  layout space as the original).
-
-Output format — use EXACTLY this structure:
-
-===TITLE===
-translated title here
-===DEDICATION===
-translated dedication here
-===PAGE 1===
-translated page 1 text here
-===PAGE 2===
-translated page 2 text here
-...and so on for EVERY page.
-
-IMPORTANT: You MUST translate EVERY page. Do not skip or leave any page in English."""
 
 
 def translate_story(story: Story, language: str, config: BookConfig) -> Story:
@@ -42,8 +13,8 @@ def translate_story(story: Story, language: str, config: BookConfig) -> Story:
         for kf in story.keyframes
     )
 
-    user_prompt = f"""Translate this entire children's picture book into {language}.
-You MUST translate ALL {len(story.keyframes)} pages — every single one.
+    user_prompt = f"""Here is the English picture book to retell in {language}.
+You MUST retell ALL {len(story.keyframes)} pages — every single one.
 
 ===TITLE===
 {story.title}
@@ -51,7 +22,8 @@ You MUST translate ALL {len(story.keyframes)} pages — every single one.
 {story.dedication}
 {pages_text}"""
 
-    raw = generate_text(config, _SYSTEM_PROMPT, user_prompt, max_tokens=16384)
+    system_prompt = build_translator_system_prompt(language, config.narrator)
+    raw = generate_text(config, system_prompt, user_prompt, max_tokens=16384)
     raw = raw.strip()
 
     # Parse the delimited output

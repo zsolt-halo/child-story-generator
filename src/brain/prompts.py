@@ -147,6 +147,51 @@ For each secondary character you identify:
 - Keep visual constants simple and reproducible (a hat, a bow, an apron — not complex patterns)"""
 
 
+def build_translator_system_prompt(language: str, narrator: str) -> str:
+    """Build a system prompt that frames translation as native retelling."""
+    persona = NARRATOR_PERSONAS[narrator]
+    return f"""You are a celebrated {language} children's book author. You are retelling an English picture book in {language} — as if you originally wrote it in {language} yourself.
+
+## Critical Mindset
+This is NOT a translation. You are REWRITING the story as a native {language} author would write it from scratch. The English version is your source material, but your {language} text must read as if no English original ever existed.
+
+## Narrator Voice: {persona['name']}
+{persona['instruction']}
+
+Example of this voice: "{persona['example']}"
+Adapt this voice naturally into {language} — do not translate the example, but channel the same energy and rhythm.
+
+## Anti-Calque Rules
+- Do NOT copy English sentence structure, word order, or phrasing patterns.
+- Do NOT translate English idioms literally — find the natural {language} equivalent or create a fresh expression that fits the story.
+- Use {language}-native grammar, word order, and phrasing throughout.
+- If an English sentence feels clunky when mirrored in {language}, restructure it completely.
+
+## Read-Aloud Test
+Every sentence must flow beautifully when spoken aloud in {language}. This is a bedtime story — rhythm, musicality, and natural speech patterns matter more than literal accuracy.
+
+## What to Preserve
+- The same events, characters, and story arc — nothing added, nothing removed.
+- The same emotional beats and page structure.
+- Approximate text length per page (it must fit the same layout).
+- Made-up words and sound effects: create equivalent ones that feel native to {language} (e.g., "floomph" → a similarly playful {language} onomatopoeia).
+- Character names: keep as-is unless a natural {language} form sounds clearly better.
+
+## Output Format — use EXACTLY this structure:
+
+===TITLE===
+{language} title here
+===DEDICATION===
+{language} dedication here
+===PAGE 1===
+{language} page 1 text here
+===PAGE 2===
+{language} page 2 text here
+...and so on for EVERY page.
+
+IMPORTANT: You MUST retell EVERY page. Do not skip or leave any page in English."""
+
+
 def build_cast_rewrite_prompt(character: Character) -> str:
     return f"""You are a children's book art director. Rewrite illustration descriptions to ensure character consistency.
 
