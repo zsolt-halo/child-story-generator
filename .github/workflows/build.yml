@@ -142,6 +142,12 @@ jobs:
     runs-on: [self-hosted, linux, arm64]
 
     steps:
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -Ls https://dl.k8s.io/release/stable.txt)/bin/linux/arm64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+
       - name: Rollout restart backend
         if: needs.build-backend.result == 'success'
         run: kubectl rollout restart deployment/backend -n starlight

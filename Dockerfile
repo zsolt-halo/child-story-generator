@@ -19,7 +19,7 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # Runtime system dependencies:
-#  - libpango*, libcairo2, libgdk-pixbuf2.0-0: WeasyPrint HTML→PDF rendering
+#  - libpango*, libcairo2, libgdk-pixbuf-2.0-0: WeasyPrint HTML→PDF rendering
 #  - ghostscript: PDF compression (called as subprocess `gs`)
 #  - libffi8: cffi runtime dependency
 #  - fonts-noto: Unicode font coverage for Hungarian text
@@ -27,7 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpango-1.0-0 \
     libpangocairo-1.0-0 \
     libpangoft2-1.0-0 \
-    libgdk-pixbuf2.0-0 \
+    libgdk-pixbuf-2.0-0 \
     libcairo2 \
     ghostscript \
     libffi8 \
