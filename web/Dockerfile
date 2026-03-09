@@ -7,6 +7,9 @@ WORKDIR /app
 
 COPY package.json package-lock.json ./
 RUN npm ci
+ARG COMMIT_HASH=unknown
+ENV VITE_COMMIT_HASH=$COMMIT_HASH
+
 COPY . .
 RUN npm run build
 
