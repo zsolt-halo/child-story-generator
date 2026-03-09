@@ -7,7 +7,7 @@ import {
   deleteCharacter,
   duplicateTemplate,
 } from "../api/client";
-import type { CharacterDetail, CharacterCreateRequest } from "../api/types";
+import type { CharacterDetail } from "../api/types";
 import { CharacterEditor } from "../components/CharacterEditor";
 
 type PanelMode =
