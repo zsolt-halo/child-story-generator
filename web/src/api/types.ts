@@ -130,6 +130,8 @@ export interface SSEEvent {
   result?: Record<string, unknown>;
   error?: string;
   index?: number;
+  position?: number;
+  queue_ahead?: number;
 }
 
 export interface SanityIssue {

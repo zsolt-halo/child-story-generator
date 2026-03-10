@@ -16,6 +16,7 @@ export function Pipeline() {
     images, imageProgress, imageTotal, resultSlug,
     castMembers, waitingForCastReview,
     coverVariations, waitingForCoverSelection,
+    queuePosition, queueAhead,
     phaseData, phaseElapsed, phaseStartTime,
     setTaskId, handleEvent,
   } = usePipelineStore();
@@ -76,6 +77,8 @@ export function Pipeline() {
     }
   }, [resultSlug, setTaskId]);
 
+  const isQueued = queuePosition > 0;
+
   if (!taskId) {
     return (
       <div className="text-center py-20">
@@ -87,22 +90,26 @@ export function Pipeline() {
   return (
     <div className="max-w-3xl mx-auto">
       <h1 className="text-2xl font-extrabold text-bark-800 mb-2">
-        {waitingForCoverSelection
-          ? "Choose Your Cover"
-          : waitingForCastReview
-            ? "Review Cast"
-            : completed
-              ? "Story Complete!"
-              : "Creating Your Story"}
+        {isQueued
+          ? "Your Story Is in Line"
+          : waitingForCoverSelection
+            ? "Choose Your Cover"
+            : waitingForCastReview
+              ? "Review Cast"
+              : completed
+                ? "Story Complete!"
+                : "Creating Your Story"}
       </h1>
       <p className="text-sm text-bark-400 mb-8">
-        {waitingForCoverSelection
-          ? "Pick the cover art that best captures your story"
-          : waitingForCastReview
-            ? "Check character descriptions before illustrations begin"
-            : completed
-              ? "Redirecting to review..."
-              : phaseMessage || "Preparing pipeline..."}
+        {isQueued
+          ? "Hang tight \u2014 we'll start as soon as it's your turn"
+          : waitingForCoverSelection
+            ? "Pick the cover art that best captures your story"
+            : waitingForCastReview
+              ? "Check character descriptions before illustrations begin"
+              : completed
+                ? "Redirecting to review..."
+                : phaseMessage || "Preparing pipeline..."}
       </p>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -126,6 +133,49 @@ export function Pipeline() {
 
         {/* Active phase details + image grid / cast review */}
         <div className="lg:col-span-2 space-y-4">
+          {/* Queue position indicator */}
+          {isQueued && (
+            <div className="bg-white rounded-[var(--radius-card)] border border-bark-100 p-8 shadow-sm text-center">
+              <div className="queue-float inline-block mb-5">
+                <div className="w-16 h-16 rounded-full bg-amber-50 flex items-center justify-center mx-auto">
+                  <svg
+                    className="w-8 h-8 text-amber-500"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    strokeWidth={1.5}
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25"
+                    />
+                  </svg>
+                </div>
+              </div>
+
+              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-amber-50 border border-amber-200 mb-4">
+                <span className="text-2xl font-extrabold text-amber-600 tabular-nums font-heading">
+                  {queueAhead}
+                </span>
+                <span className="text-sm text-amber-700 font-medium">
+                  {queueAhead === 1 ? "story ahead of yours" : "stories ahead of yours"}
+                </span>
+              </div>
+
+              <p className="text-bark-500 text-sm leading-relaxed max-w-xs mx-auto mb-5">
+                Another story is being illustrated right now.
+                Yours will begin automatically when it's next in line.
+              </p>
+
+              <div className="flex items-center justify-center gap-1.5">
+                <div className="w-2 h-2 rounded-full bg-amber-400 queue-dot-1" />
+                <div className="w-2 h-2 rounded-full bg-amber-400 queue-dot-2" />
+                <div className="w-2 h-2 rounded-full bg-amber-400 queue-dot-3" />
+              </div>
+            </div>
+          )}
+
           {/* Cast review panel */}
           {waitingForCastReview && (
             <CastReviewPanel

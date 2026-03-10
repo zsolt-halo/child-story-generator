@@ -67,7 +67,7 @@ class TaskResponse(BaseModel):
 
 class TaskStatusResponse(BaseModel):
     task_id: str
-    status: str  # pending, running, completed, failed
+    status: str  # pending, queued, running, completed, failed
     result: dict | None = None
     error: str | None = None
 

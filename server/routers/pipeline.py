@@ -21,6 +21,7 @@ async def start_full_pipeline(req: PipelineStartRequest):
         style=req.style,
         pages=req.pages,
         language=req.language,
+        exclusive=True,
     )
     return TaskResponse(task_id=task_id)
 
@@ -35,6 +36,7 @@ async def start_story_only(req: PipelineStartRequest):
         style=req.style,
         pages=req.pages,
         language=req.language,
+        exclusive=True,
     )
     return TaskResponse(task_id=task_id)
 
@@ -44,6 +46,7 @@ async def start_cast_extraction(slug: str):
     task_id = task_manager.create_task(
         pipeline_service.run_cast_extraction,
         slug=slug,
+        exclusive=True,
     )
     return TaskResponse(task_id=task_id)
 
@@ -54,6 +57,7 @@ async def start_translate(slug: str, req: TranslateRequest):
         pipeline_service.run_translate,
         slug=slug,
         language=req.language,
+        exclusive=True,
     )
     return TaskResponse(task_id=task_id)
 
@@ -63,6 +67,7 @@ async def start_illustrate(slug: str):
     task_id = task_manager.create_task(
         pipeline_service.run_illustrate,
         slug=slug,
+        exclusive=True,
     )
     return TaskResponse(task_id=task_id)
 
@@ -73,6 +78,7 @@ async def start_illustrate_page(slug: str, page: int):
         pipeline_service.run_illustrate,
         slug=slug,
         page_number=page,
+        exclusive=True,
     )
     return TaskResponse(task_id=task_id)
 
@@ -82,6 +88,7 @@ async def start_backdrops(slug: str):
     task_id = task_manager.create_task(
         pipeline_service.run_backdrops,
         slug=slug,
+        exclusive=True,
     )
     return TaskResponse(task_id=task_id)
 
@@ -92,6 +99,7 @@ async def continue_pipeline(slug: str):
     task_id = task_manager.create_task(
         pipeline_service.run_continue_pipeline,
         slug=slug,
+        exclusive=True,
     )
     return TaskResponse(task_id=task_id)
 
@@ -103,6 +111,7 @@ async def select_cover(slug: str, req: CoverSelectionRequest):
         pipeline_service.run_after_cover_selection,
         slug=slug,
         choice=req.choice,
+        exclusive=True,
     )
     return TaskResponse(task_id=task_id)
 
@@ -123,6 +132,7 @@ async def start_branch(slug: str, req: BranchRequest):
         task_id = task_manager.create_task(
             pipeline_service.run_continue_pipeline,
             slug=new_slug,
+            exclusive=True,
         )
     else:
         # Full pipeline: story → keyframes → cast → stops for review
@@ -136,6 +146,7 @@ async def start_branch(slug: str, req: BranchRequest):
             output_slug=new_slug,
             language=req.language,
             parent_slug=slug,
+            exclusive=True,
         )
 
     return TaskResponse(task_id=task_id)
@@ -146,6 +157,7 @@ async def start_pdf(slug: str):
     task_id = task_manager.create_task(
         pipeline_service.run_pdf,
         slug=slug,
+        exclusive=True,
     )
     return TaskResponse(task_id=task_id)
 

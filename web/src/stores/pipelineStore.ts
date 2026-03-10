@@ -24,6 +24,8 @@ interface PipelineState {
   waitingForCastReview: boolean;
   coverVariations: CoverVariation[];
   waitingForCoverSelection: boolean;
+  queuePosition: number;
+  queueAhead: number;
 
   // Phase timing & detail tracking
   phaseData: Record<string, Record<string, unknown>>;
@@ -51,6 +53,8 @@ const initialState = {
   waitingForCastReview: false,
   coverVariations: [] as CoverVariation[],
   waitingForCoverSelection: false,
+  queuePosition: 0,
+  queueAhead: 0,
   phaseData: {} as Record<string, Record<string, unknown>>,
   phaseStartTime: null as number | null,
   phaseElapsed: {} as Record<string, number>,
@@ -64,12 +68,19 @@ export const usePipelineStore = create<PipelineState>((set) => ({
   handleEvent: (event) =>
     set((state) => {
       switch (event.type) {
+        case "queue_position":
+          return {
+            queuePosition: event.position ?? 0,
+            queueAhead: event.queue_ahead ?? 0,
+          };
         case "phase_start":
           return {
             phase: event.phase ?? null,
             phaseMessage: event.message ?? null,
             imageTotal: event.data?.total as number ?? state.imageTotal,
             phaseStartTime: Date.now(),
+            queuePosition: 0,
+            queueAhead: 0,
           };
         case "phase_complete": {
           const phase = event.phase;
