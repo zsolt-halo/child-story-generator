@@ -41,6 +41,7 @@ export const deleteStory = (slug: string) =>
 export const getCharacters = () => request<CharacterInfo[]>("/config/characters");
 export const getStyles = () => request<StyleInfo[]>("/config/styles");
 export const getNarrators = () => request<NarratorInfo[]>("/config/narrators");
+export const getPhaseAverages = () => request<Record<string, number>>("/config/phase-averages");
 
 // Pipeline
 export const startPipeline = (req: PipelineStartRequest) =>

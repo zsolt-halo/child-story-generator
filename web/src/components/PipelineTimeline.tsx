@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 
 const PHASES = [
   { key: "story", label: "Story Generation" },
@@ -89,6 +89,13 @@ function formatElapsed(seconds: number): string {
   return s > 0 ? `${m}m ${s}s` : `${m}m`;
 }
 
+function formatEta(seconds: number): string {
+  if (seconds <= 0) return "<1s";
+  if (seconds < 60) return `~${Math.ceil(seconds)}s`;
+  const m = Math.ceil(seconds / 60);
+  return `~${m}m`;
+}
+
 /* ─── Component ─── */
 
 interface PipelineTimelineProps {
@@ -103,6 +110,7 @@ interface PipelineTimelineProps {
   phaseStartTime?: number | null;
   imageProgress?: number;
   imageTotal?: number;
+  phaseAverages?: Record<string, number>;
 }
 
 export function PipelineTimeline({
@@ -117,9 +125,11 @@ export function PipelineTimeline({
   phaseStartTime,
   imageProgress = 0,
   imageTotal = 0,
+  phaseAverages = {},
 }: PipelineTimelineProps) {
   const currentIdx = PHASES.findIndex((p) => p.key === currentPhase);
   const isWaitingAny = waitingForCastReview || waitingForCoverSelection;
+  const hasAverages = Object.keys(phaseAverages).length > 0;
 
   // Live elapsed timer for the active phase
   const [liveElapsed, setLiveElapsed] = useState(0);
@@ -134,6 +144,32 @@ export function PipelineTimeline({
     }, 1000);
     return () => clearInterval(interval);
   }, [phaseStartTime, completed, failed]);
+
+  // Compute remaining time for active phase
+  const activePhaseEta = useMemo(() => {
+    if (!hasAverages || currentIdx < 0 || completed || failed) return null;
+    const avg = phaseAverages[PHASES[currentIdx].key];
+    if (avg == null) return null;
+    const remaining = avg - liveElapsed;
+    return remaining > 0 ? remaining : null;
+  }, [hasAverages, currentIdx, completed, failed, phaseAverages, liveElapsed]);
+
+  // Compute total remaining time (current phase remaining + all future phases)
+  const totalEta = useMemo(() => {
+    if (!hasAverages || currentIdx < 0 || completed || failed || isWaitingAny) return null;
+    let total = 0;
+    // Remaining in active phase
+    const activeAvg = phaseAverages[PHASES[currentIdx].key];
+    if (activeAvg != null) {
+      total += Math.max(0, activeAvg - liveElapsed);
+    }
+    // Sum averages for all future phases
+    for (let i = currentIdx + 1; i < PHASES.length; i++) {
+      const avg = phaseAverages[PHASES[i].key];
+      if (avg != null) total += avg;
+    }
+    return total > 0 ? total : null;
+  }, [hasAverages, currentIdx, completed, failed, isWaitingAny, phaseAverages, liveElapsed]);
 
   // Overall progress
   const totalPhases = PHASES.length;
@@ -152,7 +188,14 @@ export function PipelineTimeline({
                 ? `Step ${currentIdx + 1} of ${totalPhases}`
                 : "Preparing\u2026"}
           </span>
-          <span className="text-[11px] font-bold text-bark-400 tabular-nums">{progressPct}%</span>
+          <div className="flex items-center gap-2">
+            {totalEta != null && (
+              <span className="text-[10px] text-bark-300 tabular-nums font-medium transition-opacity duration-500">
+                {formatEta(totalEta)} left
+              </span>
+            )}
+            <span className="text-[11px] font-bold text-bark-400 tabular-nums">{progressPct}%</span>
+          </div>
         </div>
         <div className="h-1.5 bg-bark-100 rounded-full overflow-hidden">
           <div
@@ -299,6 +342,12 @@ export function PipelineTimeline({
                   {isActive && liveElapsed > 0 && (
                     <span className="text-[10px] text-amber-500/70 tabular-nums font-medium">
                       {formatElapsed(liveElapsed)}
+                    </span>
+                  )}
+                  {/* ETA for active phase */}
+                  {isActive && activePhaseEta != null && (
+                    <span className="text-[10px] text-bark-300 tabular-nums font-medium transition-opacity duration-700">
+                      {formatEta(activePhaseEta)} left
                     </span>
                   )}
                 </div>

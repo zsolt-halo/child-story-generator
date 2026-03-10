@@ -7,6 +7,7 @@ from sqlalchemy import (
     ARRAY,
     Boolean,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -139,4 +140,19 @@ class CharacterRow(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
+class PhaseTimingRow(Base):
+    """Historical pipeline phase durations for ETA estimation."""
+    __tablename__ = "phase_timings"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    phase: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
+    duration_seconds: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
     )

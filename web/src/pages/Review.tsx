@@ -8,6 +8,7 @@ import {
 import { useSSE } from "../hooks/useSSE";
 import type { SanityCheckResult, SSEEvent, BranchRequest } from "../api/types";
 import { usePipelineStore } from "../stores/pipelineStore";
+import { thumb } from "../components/FadeImage";
 import { BranchDialog } from "../components/BranchDialog";
 import { ConfirmDeleteDialog } from "../components/ConfirmDeleteDialog";
 
@@ -449,7 +450,7 @@ export function Review() {
                     }`}
                   >
                     {imgUrl ? (
-                      <img src={imgUrl} alt="" className="w-full h-full object-cover" />
+                      <img src={thumb(imgUrl, 200)} alt="" className="w-full h-full object-cover" />
                     ) : (
                       <div className="w-full h-full bg-bark-100 flex items-center justify-center">
                         <span className="text-bark-300 text-[10px] font-bold">{kf.page_number}</span>

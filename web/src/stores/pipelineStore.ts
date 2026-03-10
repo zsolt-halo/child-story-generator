@@ -84,8 +84,10 @@ export const usePipelineStore = create<PipelineState>((set) => ({
           };
         case "phase_complete": {
           const phase = event.phase;
+          // Prefer server-authoritative elapsed time, fall back to client-side
           const startTime = state.phaseStartTime;
-          const elapsed = startTime ? Math.round((Date.now() - startTime) / 1000) : null;
+          const clientElapsed = startTime ? Math.round((Date.now() - startTime) / 1000) : null;
+          const elapsed = event.elapsed != null ? Math.round(event.elapsed as number) : clientElapsed;
 
           const updates: Partial<PipelineState> = {
             phaseMessage: null,

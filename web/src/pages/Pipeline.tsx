@@ -5,7 +5,8 @@ import { useSSE } from "../hooks/useSSE";
 import { PipelineTimeline } from "../components/PipelineTimeline";
 import { CastReviewPanel } from "../components/CastReviewPanel";
 import { CoverSelectionPanel } from "../components/CoverSelectionPanel";
-import { updateStory, continuePipeline, selectCoverAndContinue } from "../api/client";
+import { updateStory, continuePipeline, selectCoverAndContinue, getPhaseAverages } from "../api/client";
+import { FadeImage } from "../components/FadeImage";
 import type { CastMember } from "../api/types";
 
 export function Pipeline() {
@@ -22,6 +23,12 @@ export function Pipeline() {
   } = usePipelineStore();
   const [approving, setApproving] = useState(false);
   const [selectingCover, setSelectingCover] = useState(false);
+  const [phaseAverages, setPhaseAverages] = useState<Record<string, number>>({});
+
+  // Fetch phase averages on mount (for ETA display)
+  useEffect(() => {
+    getPhaseAverages().then(setPhaseAverages).catch(() => {});
+  }, []);
 
   // Pick up taskId from navigation state (from NewStory page) — consume only once
   const consumedStateRef = useRef(false);
@@ -130,6 +137,7 @@ export function Pipeline() {
             phaseStartTime={phaseStartTime}
             imageProgress={imageProgress}
             imageTotal={imageTotal}
+            phaseAverages={phaseAverages}
           />
         </div>
 
@@ -221,8 +229,9 @@ export function Pipeline() {
                     key={img.page}
                     className="aspect-square rounded-lg overflow-hidden bg-cream-dark relative"
                   >
-                    <img
+                    <FadeImage
                       src={img.url}
+                      thumbWidth={400}
                       alt={img.is_cover ? "Cover" : `Page ${img.page}`}
                       className="w-full h-full object-cover"
                     />

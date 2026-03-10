@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import type { StoryListItem } from "../api/types";
+import { FadeImage } from "./FadeImage";
 
 export function StoryCard({ story, onDelete }: { story: StoryListItem; onDelete?: () => void }) {
   const linkTo = story.has_images
@@ -14,8 +15,9 @@ export function StoryCard({ story, onDelete }: { story: StoryListItem; onDelete?
       {/* Cover image */}
       <div className="aspect-square bg-cream-dark relative overflow-hidden">
         {story.cover_url ? (
-          <img
+          <FadeImage
             src={story.cover_url}
+            thumbWidth={400}
             alt={story.title}
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
           />

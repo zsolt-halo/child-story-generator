@@ -61,6 +61,13 @@ async def list_styles():
     ]
 
 
+@router.get("/phase-averages")
+async def get_phase_averages():
+    """Return rolling averages of pipeline phase durations for ETA estimation."""
+    from server.services.pipeline_service import get_phase_averages as _get
+    return await _get()
+
+
 @router.get("/narrators", response_model=list[NarratorInfo])
 async def list_narrators():
     return [

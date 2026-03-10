@@ -119,6 +119,7 @@ export interface SSEEvent {
   type: string;
   phase?: string;
   message?: string;
+  elapsed?: number;
   data?: Record<string, unknown>;
   page?: number;
   is_cover?: boolean;

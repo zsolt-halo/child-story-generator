@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from server.schemas import StoryListItem, StoryUpdate
@@ -11,6 +12,17 @@ from server.services.story_service import (
 )
 
 router = APIRouter(prefix="/api/stories", tags=["stories"])
+
+
+def _generate_thumbnail(source: Path, dest: Path, width: int):
+    """Resize an image to the given width (preserving aspect ratio) and save as JPEG."""
+    from PIL import Image
+    with Image.open(source) as img:
+        ratio = width / img.width
+        height = round(img.height * ratio)
+        resized = img.resize((width, height), Image.LANCZOS)
+        resized = resized.convert("RGB")
+        resized.save(dest, "JPEG", quality=82, optimize=True)
 
 
 @router.get("/", response_model=list[StoryListItem])
@@ -76,8 +88,11 @@ async def delete_story_endpoint(slug: str):
         raise HTTPException(status_code=404, detail="Story not found")
 
 
+ALLOWED_WIDTHS = {200, 400, 600, 800}
+
+
 @router.get("/{slug}/images/{filename}")
-async def serve_image(slug: str, filename: str):
+async def serve_image(slug: str, filename: str, w: int | None = Query(None)):
     try:
         story_dir = get_story_dir(slug)
     except FileNotFoundError:
@@ -86,7 +101,27 @@ async def serve_image(slug: str, filename: str):
     file_path = story_dir / "images" / filename
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Image not found")
-    return FileResponse(file_path, media_type="image/png")
+
+    # No resize requested — serve full image
+    if w is None:
+        return FileResponse(file_path, media_type="image/png")
+
+    # Clamp to allowed widths
+    width = min(ALLOWED_WIDTHS, key=lambda x: abs(x - w))
+
+    # Check for cached thumbnail
+    thumbs_dir = story_dir / "images" / ".thumbs"
+    stem = file_path.stem
+    thumb_path = thumbs_dir / f"{stem}_w{width}.jpg"
+
+    if not thumb_path.exists():
+        # Prefer _raw.png (1024x1024) as source if it exists — smaller to decode
+        raw_path = file_path.with_name(f"{stem}_raw.png")
+        source = raw_path if raw_path.exists() else file_path
+        thumbs_dir.mkdir(exist_ok=True)
+        await asyncio.to_thread(_generate_thumbnail, source, thumb_path, width)
+
+    return FileResponse(thumb_path, media_type="image/jpeg")
 
 
 @router.get("/{slug}/backdrops/{filename}")

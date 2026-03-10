@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import type { Keyframe } from "../api/types";
+import { thumb } from "./FadeImage";
 
 interface PageEditorDrawerProps {
   keyframe: Keyframe | null;
@@ -69,7 +70,7 @@ export function PageEditorDrawer({ keyframe, imageUrl, open, onClose, onSave, on
             {/* Image preview */}
             {imageUrl && (
               <div className="relative rounded-xl overflow-hidden">
-                <img src={imageUrl} alt="Page illustration" className="w-full aspect-square object-cover" />
+                <img src={thumb(imageUrl, 600)} alt="Page illustration" className="w-full aspect-square object-cover" />
                 {onRegenerate && (
                   <button
                     onClick={() => onRegenerate(keyframe.page_number)}

@@ -18,6 +18,54 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Phase timing persistence
+# ---------------------------------------------------------------------------
+
+ROLLING_WINDOW = 20  # Number of recent runs to average for ETA
+
+
+async def _record_phase_timing(phase: str, duration: float):
+    """Persist a phase timing record to the database (fire-and-forget)."""
+    try:
+        from src.db.engine import get_async_session_factory
+        from src.db.models import PhaseTimingRow
+        async with get_async_session_factory()() as session:
+            session.add(PhaseTimingRow(phase=phase, duration_seconds=duration))
+            await session.commit()
+    except Exception:
+        logger.debug("Failed to record phase timing for %s", phase, exc_info=True)
+
+
+async def get_phase_averages() -> dict[str, float]:
+    """Return rolling averages of phase durations (last N runs per phase)."""
+    from src.db.engine import get_async_session_factory
+    from src.db.models import PhaseTimingRow
+    from sqlalchemy import func, select
+    from sqlalchemy.orm import aliased
+
+    async with get_async_session_factory()() as session:
+        # Subquery: rank each timing row per phase by recency
+        sub = (
+            select(
+                PhaseTimingRow.phase,
+                PhaseTimingRow.duration_seconds,
+                func.row_number()
+                    .over(partition_by=PhaseTimingRow.phase, order_by=PhaseTimingRow.created_at.desc())
+                    .label("rn"),
+            )
+            .subquery()
+        )
+        # Outer: average only the last ROLLING_WINDOW rows per phase
+        stmt = (
+            select(sub.c.phase, func.avg(sub.c.duration_seconds))
+            .where(sub.c.rn <= ROLLING_WINDOW)
+            .group_by(sub.c.phase)
+        )
+        rows = (await session.execute(stmt)).all()
+    return {phase: round(avg, 1) for phase, avg in rows}
+
+
+# ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
 
@@ -87,10 +135,12 @@ async def _phase(task_id: str, phase: str, message: str, **extra_data):
     yield result  # caller can set result["data"] for the complete event
     elapsed = _time.monotonic() - t
     logger.info("Phase %s completed in %.1fs", phase, elapsed)
-    complete_event: dict = {"type": "phase_complete", "phase": phase}
+    complete_event: dict = {"type": "phase_complete", "phase": phase, "elapsed": round(elapsed, 1)}
     if result:
         complete_event["data"] = result
     await task_manager.broadcast(task_id, complete_event)
+    # Record timing for future ETA estimation (fire-and-forget)
+    asyncio.create_task(_record_phase_timing(phase, elapsed))
 
 
 async def _illustrate_keyframes(

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { CoverVariation } from "../api/types";
+import { FadeImage } from "./FadeImage";
 
 interface CoverSelectionPanelProps {
   variations: CoverVariation[];
@@ -31,8 +32,9 @@ export function CoverSelectionPanel({ variations, onSelect, selecting }: CoverSe
                 : "border-bark-100 hover:border-bark-200"
             } ${selecting ? "opacity-60 cursor-not-allowed" : "cursor-pointer"}`}
           >
-            <img
+            <FadeImage
               src={v.url}
+              thumbWidth={600}
               alt={`Cover option ${v.index}`}
               className="w-full h-full object-cover"
             />

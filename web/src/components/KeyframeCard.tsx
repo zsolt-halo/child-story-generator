@@ -1,4 +1,5 @@
 import type { Keyframe } from "../api/types";
+import { FadeImage } from "./FadeImage";
 
 interface KeyframeCardProps {
   keyframe: Keyframe;
@@ -16,8 +17,9 @@ export function KeyframeCard({ keyframe, imageUrl, onClick }: KeyframeCardProps)
       {/* Thumbnail */}
       <div className="aspect-square bg-cream-dark relative overflow-hidden">
         {imageUrl ? (
-          <img
+          <FadeImage
             src={imageUrl}
+            thumbWidth={400}
             alt={`Page ${keyframe.page_number}`}
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
           />
