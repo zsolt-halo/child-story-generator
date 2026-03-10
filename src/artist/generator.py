@@ -70,13 +70,26 @@ def generate_single_image(
     prompt: str,
     model: str,
     output_path: Path,
+    reference_image: bytes | None = None,
 ) -> Path:
-    """Generate a single image via Gemini and save it to disk."""
+    """Generate a single image via Gemini and save it to disk.
+
+    If reference_image bytes are provided, they are sent as a visual reference
+    alongside the text prompt for character consistency.
+    """
+    if reference_image is not None:
+        contents = [
+            types.Part.from_bytes(data=reference_image, mime_type="image/png"),
+            prompt,
+        ]
+    else:
+        contents = prompt
+
     for attempt in range(MAX_RETRIES):
         try:
             response = client.models.generate_content(
                 model=model,
-                contents=prompt,
+                contents=contents,
                 config=types.GenerateContentConfig(
                     response_modalities=["IMAGE", "TEXT"],
                 ),
@@ -116,6 +129,91 @@ def upscale_for_print(
     return output_path
 
 
+def generate_reference_sheet(
+    character: Character,
+    style_anchor: str,
+    config: BookConfig,
+    output_dir: Path,
+) -> Path | None:
+    """Generate a character reference/model sheet for visual consistency.
+
+    Returns the path to the saved reference sheet, or None if generation fails.
+    Skips generation if the file already exists (resume-safe).
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    final_path = output_dir / "reference_sheet.png"
+
+    if final_path.exists():
+        return final_path
+
+    prompt = (
+        f"Character model sheet / reference sheet for a children's book character. "
+        f"Show the character in multiple poses: front view, three-quarter view, side view, "
+        f"plus 2-3 facial expressions (happy, surprised, thoughtful). "
+        f"Clean white background, no other characters, no scenery. "
+        f"Character: {character.visual.description}. "
+        f"Visual constants: {character.visual.constants}. "
+        f"Art style: {style_anchor}. "
+        f"Professional character turnaround sheet for animation/illustration reference. "
+        f"Square format."
+    )
+
+    try:
+        client = create_image_client(config)
+        raw_path = output_dir / "reference_sheet_raw.png"
+        generate_single_image(client, prompt, config.image_model, raw_path)
+        upscale_for_print(raw_path, final_path)
+        return final_path
+    except Exception:
+        return None
+
+
+def generate_cover_variations(
+    keyframe: Keyframe,
+    character: Character,
+    style_anchor: str,
+    config: BookConfig,
+    output_dir: Path,
+    title: str = "",
+    cast: list[CastMember] | None = None,
+    count: int = 4,
+    reference_image: bytes | None = None,
+) -> list[Path]:
+    """Generate multiple cover art variations. Skips existing files (resume-safe)."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    prompt = build_image_prompt(keyframe, character, style_anchor, title=title, cast=cast)
+    client = None
+    paths: list[Path] = []
+
+    for i in range(1, count + 1):
+        final_path = output_dir / f"cover_v{i}.png"
+
+        if final_path.exists():
+            paths.append(final_path)
+            continue
+
+        if client is None:
+            client = create_image_client(config)
+
+        raw_path = output_dir / f"cover_v{i}_raw.png"
+        generate_single_image(client, prompt, config.image_model, raw_path, reference_image=reference_image)
+        upscale_for_print(raw_path, final_path)
+        paths.append(final_path)
+
+        if i < count:
+            time.sleep(2.0)
+
+    return paths
+
+
+def load_reference_sheet(images_dir: Path) -> bytes | None:
+    """Load reference sheet bytes if the file exists, else None."""
+    ref_path = images_dir / "reference_sheet.png"
+    if ref_path.exists():
+        return ref_path.read_bytes()
+    return None
+
+
 def generate_all_illustrations(
     keyframes: list[Keyframe],
     character: Character,
@@ -125,6 +223,7 @@ def generate_all_illustrations(
     progress: Progress | None = None,
     title: str = "",
     cast: list[CastMember] | None = None,
+    reference_image: bytes | None = None,
 ) -> list[Path]:
     """Generate illustrations for all keyframes. Skips images that already exist."""
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -153,7 +252,7 @@ def generate_all_illustrations(
         prompt = build_image_prompt(kf, character, style_anchor, title=title, cast=cast)
 
         raw_path = output_dir / f"{prefix}_raw.png"
-        generate_single_image(client, prompt, config.image_model, raw_path)
+        generate_single_image(client, prompt, config.image_model, raw_path, reference_image=reference_image)
 
         upscale_for_print(raw_path, final_path)
 

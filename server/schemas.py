@@ -48,6 +48,10 @@ class StoryUpdate(BaseModel):
     cast: list[CastMemberUpdate] | None = None
 
 
+class CoverSelectionRequest(BaseModel):
+    choice: int  # 1-based: 1, 2, 3, or 4
+
+
 class BranchRequest(BaseModel):
     character: str = "lana-llama"
     narrator: str = "whimsical"

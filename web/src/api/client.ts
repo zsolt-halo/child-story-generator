@@ -60,6 +60,11 @@ export const startBackdrops = (slug: string) =>
   request<TaskResponse>(`/pipeline/backdrops/${slug}`, { method: "POST" });
 export const continuePipeline = (slug: string) =>
   request<TaskResponse>(`/pipeline/continue/${slug}`, { method: "POST" });
+export const selectCoverAndContinue = (slug: string, choice: number) =>
+  request<TaskResponse>(`/pipeline/select-cover/${slug}`, {
+    method: "POST",
+    body: JSON.stringify({ choice }),
+  });
 export const branchStory = (slug: string, req: BranchRequest) =>
   request<TaskResponse>(`/pipeline/branch/${slug}`, { method: "POST", body: JSON.stringify(req) });
 export const startPdf = (slug: string) =>

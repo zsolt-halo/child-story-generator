@@ -115,18 +115,34 @@ async def run_full_pipeline(
             "data": {"translated_title": story.title_translated},
         })
 
+    # Phase 2c: Reference Sheet
+    await task_manager.broadcast(task_id, {
+        "type": "phase_start", "phase": "reference_sheet",
+        "message": "Generating character reference sheet...",
+    })
+    from src.artist.generator import (
+        generate_reference_sheet, load_reference_sheet,
+        build_image_prompt, create_image_client, generate_single_image, upscale_for_print,
+    )
+    images_dir = output_dir / "images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    ref_path = await asyncio.to_thread(generate_reference_sheet, char, style_anchor, config, images_dir)
+    await task_manager.broadcast(task_id, {
+        "type": "phase_complete", "phase": "reference_sheet",
+        "data": {"generated": ref_path is not None},
+    })
+
+    # Load reference sheet for all subsequent image generation
+    ref_bytes = load_reference_sheet(images_dir)
+
     # Phase 3: Illustrations
+    cover_title = story.title_translated or story.title
     await task_manager.broadcast(task_id, {
         "type": "phase_start", "phase": "illustration",
         "message": "Generating illustrations...",
         "data": {"total": len(story.keyframes)},
     })
 
-    from src.artist.generator import (
-        build_image_prompt, create_image_client, generate_single_image, upscale_for_print,
-    )
-    images_dir = output_dir / "images"
-    images_dir.mkdir(parents=True, exist_ok=True)
     client = create_image_client(config)
     image_paths: list[Path] = []
 
@@ -144,10 +160,10 @@ async def run_full_pipeline(
             })
             continue
 
-        prompt = build_image_prompt(kf, char, style_anchor, title=story.title, cast=story.cast or None)
+        prompt = build_image_prompt(kf, char, style_anchor, title=cover_title, cast=story.cast or None)
         raw_path = images_dir / f"{prefix}_raw.png"
 
-        await asyncio.to_thread(generate_single_image, client, prompt, config.image_model, raw_path)
+        await asyncio.to_thread(generate_single_image, client, prompt, config.image_model, raw_path, reference_image=ref_bytes)
         await asyncio.to_thread(upscale_for_print, raw_path, final_path)
 
         image_paths.append(final_path)
@@ -321,11 +337,14 @@ async def run_illustrate(task_id: str, slug: str, page_number: int | None = None
 
     from src.artist.generator import (
         build_image_prompt, create_image_client, generate_single_image, upscale_for_print,
+        load_reference_sheet,
     )
 
     images_dir = story_dir / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
     client = create_image_client(config)
+    ref_bytes = load_reference_sheet(images_dir)
+    cover_title = story.title_translated or story.title
 
     keyframes = story.keyframes
     if page_number is not None:
@@ -352,8 +371,8 @@ async def run_illustrate(task_id: str, slug: str, page_number: int | None = None
                     p.unlink()
 
         if not final_path.exists():
-            prompt = build_image_prompt(kf, char, style_anchor, title=story.title, cast=story.cast or None)
-            await asyncio.to_thread(generate_single_image, client, prompt, config.image_model, raw_path)
+            prompt = build_image_prompt(kf, char, style_anchor, title=cover_title, cast=story.cast or None)
+            await asyncio.to_thread(generate_single_image, client, prompt, config.image_model, raw_path, reference_image=ref_bytes)
             await asyncio.to_thread(upscale_for_print, raw_path, final_path)
 
         new_paths.append(final_path)
@@ -401,7 +420,11 @@ async def run_backdrops(task_id: str, slug: str) -> dict:
 
 
 async def run_continue_pipeline(task_id: str, slug: str) -> dict:
-    """Continue pipeline after cast review: translate → illustrate → backdrops → PDF."""
+    """Continue pipeline after cast review: translate → ref sheet → cover variations → STOP.
+
+    The pipeline pauses here for cover selection. After the user picks a cover,
+    run_after_cover_selection() finishes with page illustrations → backdrops → PDF.
+    """
     from server.services.story_service import get_story
     story, image_paths, story_dir = await get_story(slug)
     config, meta = await _config_from_metadata(slug)
@@ -424,18 +447,106 @@ async def run_continue_pipeline(task_id: str, slug: str) -> dict:
             "data": {"translated_title": story.title_translated},
         })
 
-    # Phase 3: Illustrations
+    from src.artist.generator import (
+        generate_reference_sheet, generate_cover_variations, load_reference_sheet,
+    )
+
+    # Phase 2c: Reference Sheet
+    await task_manager.broadcast(task_id, {
+        "type": "phase_start", "phase": "reference_sheet",
+        "message": "Generating character reference sheet...",
+    })
+    images_dir = story_dir / "images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    ref_path = await asyncio.to_thread(generate_reference_sheet, char, style_anchor, config, images_dir)
+    await task_manager.broadcast(task_id, {
+        "type": "phase_complete", "phase": "reference_sheet",
+        "data": {"generated": ref_path is not None},
+    })
+
+    # Phase 2d: Cover Variations
+    cover_kf = next((kf for kf in story.keyframes if kf.is_cover), None)
+    if cover_kf:
+        cover_title = story.title_translated or story.title
+        ref_bytes = load_reference_sheet(images_dir)
+
+        await task_manager.broadcast(task_id, {
+            "type": "phase_start", "phase": "cover_variations",
+            "message": "Generating cover options...",
+            "data": {"total": 4},
+        })
+
+        variation_paths = await asyncio.to_thread(
+            generate_cover_variations,
+            cover_kf, char, style_anchor, config, images_dir,
+            title=cover_title, cast=story.cast or None, count=4,
+            reference_image=ref_bytes,
+        )
+
+        # Broadcast each variation for the frontend
+        cover_variations = []
+        for i, vp in enumerate(variation_paths):
+            url = f"/api/stories/{slug}/images/{vp.name}"
+            cover_variations.append({"index": i + 1, "url": url})
+            await task_manager.broadcast(task_id, {
+                "type": "cover_variation_complete",
+                "index": i + 1,
+                "url": url,
+            })
+
+        await task_manager.broadcast(task_id, {
+            "type": "phase_complete", "phase": "cover_variations",
+            "data": {"count": len(variation_paths)},
+        })
+
+        return {
+            "slug": slug,
+            "title": story.title,
+            "cover_variations": cover_variations,
+        }
+
+    # No cover keyframe — shouldn't happen but fall through
+    return {"slug": slug, "title": story.title}
+
+
+async def run_after_cover_selection(task_id: str, slug: str, choice: int) -> dict:
+    """Continue pipeline after cover selection: copy cover → page illustrations → backdrops → PDF."""
+    import shutil
+    from server.services.story_service import get_story
+    story, existing_image_paths, story_dir = await get_story(slug)
+    config, _ = await _config_from_metadata(slug)
+    style_data = load_style(config.style)
+    style_anchor = style_data.get("anchor", style_data["description"])
+    char = await async_resolve_character(config.character)
+
+    images_dir = story_dir / "images"
+
+    # Copy chosen cover variation to cover.png
+    chosen_path = images_dir / f"cover_v{choice}.png"
+    chosen_raw = images_dir / f"cover_v{choice}_raw.png"
+    cover_final = images_dir / "cover.png"
+    cover_raw = images_dir / "cover_raw.png"
+
+    if chosen_path.exists():
+        shutil.copy2(chosen_path, cover_final)
+    if chosen_raw.exists():
+        shutil.copy2(chosen_raw, cover_raw)
+
+    from src.artist.generator import (
+        build_image_prompt, create_image_client, generate_single_image, upscale_for_print,
+        load_reference_sheet,
+    )
+
+    ref_bytes = load_reference_sheet(images_dir)
+    cover_title = story.title_translated or story.title
+
+    # Phase 3: Page Illustrations (cover.png already exists, will be skipped)
     await task_manager.broadcast(task_id, {
         "type": "phase_start", "phase": "illustration",
         "message": "Generating illustrations...",
         "data": {"total": len(story.keyframes)},
     })
 
-    from src.artist.generator import (
-        build_image_prompt, create_image_client, generate_single_image, upscale_for_print,
-    )
-    images_dir = story_dir / "images"
-    images_dir.mkdir(parents=True, exist_ok=True)
     client = create_image_client(config)
     new_image_paths: list[Path] = []
 
@@ -453,10 +564,10 @@ async def run_continue_pipeline(task_id: str, slug: str) -> dict:
             })
             continue
 
-        prompt = build_image_prompt(kf, char, style_anchor, title=story.title, cast=story.cast or None)
+        prompt = build_image_prompt(kf, char, style_anchor, title=cover_title, cast=story.cast or None)
         raw_path = images_dir / f"{prefix}_raw.png"
 
-        await asyncio.to_thread(generate_single_image, client, prompt, config.image_model, raw_path)
+        await asyncio.to_thread(generate_single_image, client, prompt, config.image_model, raw_path, reference_image=ref_bytes)
         await asyncio.to_thread(upscale_for_print, raw_path, final_path)
 
         new_image_paths.append(final_path)

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { SSEEvent, CastMember } from "../api/types";
+import type { SSEEvent, CastMember, CoverVariation } from "../api/types";
 
 interface ImageStatus {
   page: number;
@@ -22,10 +22,13 @@ interface PipelineState {
   resultTitle: string | null;
   castMembers: CastMember[];
   waitingForCastReview: boolean;
+  coverVariations: CoverVariation[];
+  waitingForCoverSelection: boolean;
 
   setTaskId: (id: string) => void;
   handleEvent: (event: SSEEvent) => void;
   setWaitingForCastReview: (v: boolean) => void;
+  setWaitingForCoverSelection: (v: boolean) => void;
   reset: () => void;
 }
 
@@ -43,6 +46,8 @@ const initialState = {
   resultTitle: null,
   castMembers: [] as CastMember[],
   waitingForCastReview: false,
+  coverVariations: [] as CoverVariation[],
+  waitingForCoverSelection: false,
 };
 
 export const usePipelineStore = create<PipelineState>((set) => ({
@@ -84,16 +89,26 @@ export const usePipelineStore = create<PipelineState>((set) => ({
             imageProgress: event.progress ?? state.imageProgress,
             imageTotal: event.total ?? state.imageTotal,
           };
+        case "cover_variation_complete":
+          return {
+            coverVariations: [
+              ...state.coverVariations,
+              { index: event.index!, url: event.url! },
+            ],
+          };
         case "task_complete": {
           const slug = (event.result?.slug as string) ?? state.resultSlug;
           const hasCast = state.castMembers.length > 0;
           // If this was a story-only task (cast present, no images), pause for cast review
-          const shouldWait = hasCast && state.images.length === 0;
+          const shouldWaitCast = hasCast && state.images.length === 0 && state.coverVariations.length === 0;
+          // If cover variations were generated, pause for cover selection
+          const shouldWaitCover = state.coverVariations.length > 0;
           return {
             completed: true,
             resultSlug: slug,
             resultTitle: (event.result?.title as string) ?? state.resultTitle,
-            waitingForCastReview: shouldWait,
+            waitingForCastReview: shouldWaitCast,
+            waitingForCoverSelection: shouldWaitCover,
           };
         }
         case "error":
@@ -104,6 +119,8 @@ export const usePipelineStore = create<PipelineState>((set) => ({
     }),
 
   setWaitingForCastReview: (v) => set({ waitingForCastReview: v }),
+
+  setWaitingForCoverSelection: (v) => set({ waitingForCoverSelection: v }),
 
   reset: () => set(initialState),
 }));

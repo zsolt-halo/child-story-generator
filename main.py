@@ -166,6 +166,23 @@ def generate(notes_file: Path, character: str, narrator: str, style: str, pages:
 
     style_anchor = style_data.get("anchor", style_desc)
 
+    # Phase 2c: Reference Sheet
+    console.print(Panel("Generating character reference sheet...", title="Phase 2c: Reference Sheet"))
+    with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), transient=True) as progress:
+        progress.add_task("Creating character model sheet with Gemini...", total=None)
+        from src.artist.generator import generate_reference_sheet, load_reference_sheet
+        ref_path = generate_reference_sheet(char, style_anchor, config, images_dir)
+
+    if ref_path:
+        console.print(f"[green]Reference sheet:[/green] {ref_path}")
+    else:
+        console.print("[yellow]Reference sheet generation failed, continuing without it[/yellow]")
+
+    ref_bytes = load_reference_sheet(images_dir)
+    console.print()
+
+    cover_title = story.title_translated or story.title
+
     # Phase 3: Illustration (skips already-generated images)
     console.print(Panel("Generating illustrations with Gemini...", title="Phase 3: Art"))
     with Progress(
@@ -177,7 +194,8 @@ def generate(notes_file: Path, character: str, narrator: str, style: str, pages:
         from src.artist.generator import generate_all_illustrations
         image_paths = generate_all_illustrations(
             story.keyframes, char, config, style_anchor, images_dir, progress,
-            title=story.title, cast=story.cast or None,
+            title=cover_title, cast=story.cast or None,
+            reference_image=ref_bytes,
         )
 
     # Update DB with image paths

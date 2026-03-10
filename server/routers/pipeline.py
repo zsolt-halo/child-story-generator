@@ -4,7 +4,7 @@ import json
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from server.schemas import PipelineStartRequest, TranslateRequest, TaskResponse, TaskStatusResponse, BranchRequest
+from server.schemas import PipelineStartRequest, TranslateRequest, TaskResponse, TaskStatusResponse, BranchRequest, CoverSelectionRequest
 from server.services.task_manager import task_manager
 from server.services import pipeline_service
 
@@ -92,6 +92,17 @@ async def continue_pipeline(slug: str):
     task_id = task_manager.create_task(
         pipeline_service.run_continue_pipeline,
         slug=slug,
+    )
+    return TaskResponse(task_id=task_id)
+
+
+@router.post("/select-cover/{slug}", response_model=TaskResponse)
+async def select_cover(slug: str, req: CoverSelectionRequest):
+    """Continue pipeline after cover selection: copy chosen cover → page illustrations → backdrops → PDF."""
+    task_id = task_manager.create_task(
+        pipeline_service.run_after_cover_selection,
+        slug=slug,
+        choice=req.choice,
     )
     return TaskResponse(task_id=task_id)
 

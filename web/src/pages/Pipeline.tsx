@@ -4,7 +4,8 @@ import { usePipelineStore } from "../stores/pipelineStore";
 import { useSSE } from "../hooks/useSSE";
 import { PipelineTimeline } from "../components/PipelineTimeline";
 import { CastReviewPanel } from "../components/CastReviewPanel";
-import { updateStory, continuePipeline } from "../api/client";
+import { CoverSelectionPanel } from "../components/CoverSelectionPanel";
+import { updateStory, continuePipeline, selectCoverAndContinue } from "../api/client";
 import type { CastMember } from "../api/types";
 
 export function Pipeline() {
@@ -14,9 +15,11 @@ export function Pipeline() {
     taskId, phase, phaseMessage, completed, failed, error,
     images, imageProgress, imageTotal, resultSlug,
     castMembers, waitingForCastReview,
-    setTaskId, handleEvent, setWaitingForCastReview,
+    coverVariations, waitingForCoverSelection,
+    setTaskId, handleEvent, setWaitingForCastReview, setWaitingForCoverSelection,
   } = usePipelineStore();
   const [approving, setApproving] = useState(false);
+  const [selectingCover, setSelectingCover] = useState(false);
 
   // Pick up taskId from navigation state (from NewStory page)
   useEffect(() => {
@@ -28,15 +31,15 @@ export function Pipeline() {
 
   useSSE(taskId, "/api/pipeline/progress", handleEvent);
 
-  // Navigate to review on completion (but not if waiting for cast review)
+  // Navigate to review on completion (but not if waiting for cast review or cover selection)
   useEffect(() => {
-    if (completed && resultSlug && !waitingForCastReview) {
+    if (completed && resultSlug && !waitingForCastReview && !waitingForCoverSelection) {
       const timer = setTimeout(() => {
         navigate(`/stories/${resultSlug}/review`);
       }, 2000);
       return () => clearTimeout(timer);
     }
-  }, [completed, resultSlug, waitingForCastReview, navigate]);
+  }, [completed, resultSlug, waitingForCastReview, waitingForCoverSelection, navigate]);
 
   const handleCastApprove = useCallback(async (cast: CastMember[]) => {
     if (!resultSlug) return;
@@ -55,6 +58,20 @@ export function Pipeline() {
     }
   }, [resultSlug, setTaskId, setWaitingForCastReview]);
 
+  const handleCoverSelect = useCallback(async (choice: number) => {
+    if (!resultSlug) return;
+    setSelectingCover(true);
+    try {
+      const res = await selectCoverAndContinue(resultSlug, choice);
+      setWaitingForCoverSelection(false);
+      setTaskId(res.task_id);
+    } catch (err) {
+      console.error("Failed to continue after cover selection:", err);
+    } finally {
+      setSelectingCover(false);
+    }
+  }, [resultSlug, setTaskId, setWaitingForCoverSelection]);
+
   if (!taskId) {
     return (
       <div className="text-center py-20">
@@ -66,18 +83,22 @@ export function Pipeline() {
   return (
     <div className="max-w-3xl mx-auto">
       <h1 className="text-2xl font-extrabold text-bark-800 mb-2">
-        {waitingForCastReview
-          ? "Review Cast"
-          : completed
-            ? "Story Complete!"
-            : "Creating Your Story"}
+        {waitingForCoverSelection
+          ? "Choose Your Cover"
+          : waitingForCastReview
+            ? "Review Cast"
+            : completed
+              ? "Story Complete!"
+              : "Creating Your Story"}
       </h1>
       <p className="text-sm text-bark-400 mb-8">
-        {waitingForCastReview
-          ? "Check character descriptions before illustrations begin"
-          : completed
-            ? "Redirecting to review..."
-            : phaseMessage || "Preparing pipeline..."}
+        {waitingForCoverSelection
+          ? "Pick the cover art that best captures your story"
+          : waitingForCastReview
+            ? "Check character descriptions before illustrations begin"
+            : completed
+              ? "Redirecting to review..."
+              : phaseMessage || "Preparing pipeline..."}
       </p>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -89,6 +110,7 @@ export function Pipeline() {
             completed={completed}
             failed={failed}
             waitingForCastReview={waitingForCastReview}
+            waitingForCoverSelection={waitingForCoverSelection}
           />
         </div>
 
@@ -103,8 +125,18 @@ export function Pipeline() {
             />
           )}
 
+          {/* Cover selection panel */}
+          {waitingForCoverSelection && (
+            <CoverSelectionPanel
+              slug={resultSlug || ""}
+              variations={coverVariations}
+              onSelect={handleCoverSelect}
+              selecting={selectingCover}
+            />
+          )}
+
           {/* Image progress */}
-          {(phase === "illustration" || images.length > 0) && !waitingForCastReview && (
+          {(phase === "illustration" || images.length > 0) && !waitingForCastReview && !waitingForCoverSelection && (
             <div className="bg-white rounded-[var(--radius-card)] border border-bark-100 p-5 shadow-sm">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-sm font-bold text-bark-600">Illustrations</h2>

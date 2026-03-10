@@ -3,6 +3,8 @@ const PHASES = [
   { key: "keyframes", label: "Page Keyframes" },
   { key: "cast", label: "Cast Extraction" },
   { key: "translation", label: "Translation" },
+  { key: "reference_sheet", label: "Reference Sheet" },
+  { key: "cover_variations", label: "Cover Options" },
   { key: "illustration", label: "Illustrations" },
   { key: "backdrops", label: "Backdrops" },
   { key: "pdf", label: "PDF Rendering" },
@@ -13,17 +15,21 @@ interface PipelineTimelineProps {
   completed: boolean;
   failed: boolean;
   waitingForCastReview?: boolean;
+  waitingForCoverSelection?: boolean;
 }
 
-export function PipelineTimeline({ currentPhase, completed, failed, waitingForCastReview }: PipelineTimelineProps) {
+export function PipelineTimeline({ currentPhase, completed, failed, waitingForCastReview, waitingForCoverSelection }: PipelineTimelineProps) {
   const currentIdx = PHASES.findIndex((p) => p.key === currentPhase);
+  const isWaitingAny = waitingForCastReview || waitingForCoverSelection;
 
   return (
     <div className="space-y-1">
       {PHASES.map((phase, i) => {
-        const isDone = currentIdx > i || (completed && !waitingForCastReview);
+        const isDone = currentIdx > i || (completed && !isWaitingAny);
         const isActive = currentIdx === i && !completed && !failed;
-        const isWaiting = waitingForCastReview && phase.key === "cast" && completed;
+        const isWaiting =
+          (waitingForCastReview && phase.key === "cast" && completed) ||
+          (waitingForCoverSelection && phase.key === "cover_variations" && completed);
 
         return (
           <div key={phase.key} className="flex items-center gap-3">
@@ -57,7 +63,9 @@ export function PipelineTimeline({ currentPhase, completed, failed, waitingForCa
                 <span className="ml-2 text-xs text-bark-400 font-normal">Running...</span>
               )}
               {isWaiting && (
-                <span className="ml-2 text-xs text-amber-600 font-normal">Review needed</span>
+                <span className="ml-2 text-xs text-amber-600 font-normal">
+                  {phase.key === "cast" ? "Review needed" : "Selection needed"}
+                </span>
               )}
             </span>
           </div>

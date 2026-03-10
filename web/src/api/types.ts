@@ -110,6 +110,11 @@ export interface TaskStatus {
   error: string | null;
 }
 
+export interface CoverVariation {
+  index: number;
+  url: string;
+}
+
 export interface SSEEvent {
   type: string;
   phase?: string;
@@ -124,6 +129,7 @@ export interface SSEEvent {
   task_id?: string;
   result?: Record<string, unknown>;
   error?: string;
+  index?: number;
 }
 
 export interface SanityIssue {
