@@ -1,12 +1,16 @@
+import logging
 import re
 
 from src.brain.client import generate_text
 from src.brain.prompts import build_translator_system_prompt
 from src.models import BookConfig, Story
 
+logger = logging.getLogger(__name__)
+
 
 def translate_story(story: Story, language: str, config: BookConfig) -> Story:
     """Translate all story text into the target language using Gemini."""
+    logger.info("Translating '%s' to %s (%d pages)", story.title, language, len(story.keyframes))
     # Build the full story text for context
     pages_text = "\n\n".join(
         f"===PAGE {kf.page_number}===\n{kf.page_text}"
@@ -55,4 +59,5 @@ You MUST retell ALL {len(story.keyframes)} pages — every single one.
             f"Missing pages: {missing}"
         )
 
+    logger.info("Translation complete: '%s' → '%s'", story.title, story.title_translated)
     return story

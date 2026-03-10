@@ -1,3 +1,4 @@
+import logging
 import re
 
 from pydantic import BaseModel
@@ -5,6 +6,8 @@ from pydantic import BaseModel
 from src.brain.client import generate_structured, generate_text
 from src.brain.prompts import build_cast_extraction_prompt, build_cast_rewrite_prompt
 from src.models import BookConfig, CastMember, Character, Story
+
+logger = logging.getLogger(__name__)
 
 
 class CastList(BaseModel):
@@ -34,6 +37,7 @@ def extract_cast(story: Story, character: Character, config: BookConfig) -> Stor
         f"Identify ALL secondary characters in this story and create their visual cast sheet."
     )
 
+    logger.info("Extracting cast from '%s'", story.title)
     cast_list = generate_structured(config, system_prompt, user_prompt, schema=CastList)
 
     # Filter out any entry that matches the protagonist name
@@ -44,6 +48,7 @@ def extract_cast(story: Story, character: Character, config: BookConfig) -> Stor
     ]
 
     story.cast = members
+    logger.info("Cast extracted: %d members (%s)", len(members), ", ".join(m.name for m in members))
 
     if not members:
         return story

@@ -24,6 +24,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://starlight:starlight@postgres:5432/starlight
       CORS_ORIGINS: "http://localhost:5173,http://localhost:3000"
+      LOG_LEVEL: DEBUG
     volumes:
       - stories-data:/app/stories
     depends_on:

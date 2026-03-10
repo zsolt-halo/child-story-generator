@@ -1,3 +1,4 @@
+import logging
 import os
 
 from google import genai
@@ -5,6 +6,8 @@ from google.genai import types
 from pydantic import BaseModel
 
 from src.models import BookConfig
+
+logger = logging.getLogger(__name__)
 
 
 def _create_client(config: BookConfig) -> genai.Client:
@@ -22,6 +25,7 @@ def generate_text(
     max_tokens: int = 8192,
 ) -> str:
     """Generate text using Gemini."""
+    logger.debug("generate_text: model=%s prompt_len=%d", config.text_model, len(user_prompt))
     client = _create_client(config)
     response = client.models.generate_content(
         model=config.text_model,
@@ -31,6 +35,13 @@ def generate_text(
             max_output_tokens=max_tokens,
         ),
     )
+    logger.debug("generate_text: response_len=%d", len(response.text))
+    if hasattr(response, "usage_metadata") and response.usage_metadata:
+        u = response.usage_metadata
+        logger.debug("Token usage: prompt=%s candidates=%s total=%s",
+                      getattr(u, "prompt_token_count", "?"),
+                      getattr(u, "candidates_token_count", "?"),
+                      getattr(u, "total_token_count", "?"))
     return response.text
 
 
@@ -42,6 +53,8 @@ def generate_structured(
     max_tokens: int = 16384,
 ) -> BaseModel:
     """Generate structured output using Gemini with a Pydantic schema."""
+    logger.debug("generate_structured: model=%s schema=%s prompt_len=%d",
+                 config.text_model, schema.__name__, len(user_prompt))
     client = _create_client(config)
     response = client.models.generate_content(
         model=config.text_model,
@@ -53,6 +66,7 @@ def generate_structured(
             response_schema=schema,
         ),
     )
+    logger.debug("generate_structured: response_len=%d", len(response.text))
     return schema.model_validate_json(response.text)
 
 
@@ -64,6 +78,7 @@ def generate_multimodal(
     max_tokens: int = 4096,
 ) -> str:
     """Send image + text to Gemini for multimodal analysis."""
+    logger.debug("generate_multimodal: model=%s image_size=%d KB", config.text_model, len(image_bytes) // 1024)
     client = _create_client(config)
     response = client.models.generate_content(
         model=config.text_model,

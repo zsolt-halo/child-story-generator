@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import shutil
 from pathlib import Path
 
@@ -9,6 +10,8 @@ from src.brain.client import generate_multimodal
 from src.utils.config import build_config, load_character, load_style
 from server.schemas import SanityCheckResult, SanityIssue
 from server.services.task_manager import task_manager
+
+logger = logging.getLogger(__name__)
 
 _SANITY_SYSTEM_PROMPT = """\
 You are an illustration quality checker for a children's picture book.
@@ -131,6 +134,7 @@ Analyze the image and report any discrepancies."""
 
 async def check_all_pages(task_id: str, slug: str) -> dict:
     """Run sanity check on all illustrations."""
+    logger.info("Running sanity check on all pages: %s", slug)
     from server.services.story_service import get_story
 
     story_dir = Path("stories") / slug
@@ -179,6 +183,7 @@ async def check_all_pages(task_id: str, slug: str) -> dict:
 
 async def auto_fix_page(task_id: str, slug: str, page_number: int) -> dict:
     """Auto-fix a flagged illustration by updating the visual description and regenerating."""
+    logger.info("Auto-fixing page %d of %s", page_number, slug)
     from server.services.story_service import get_story, save_to_db, get_metadata
 
     # First run sanity check to get the suggested fix

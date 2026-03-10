@@ -3,12 +3,13 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getStory, startSanityCheck, checkSinglePage, startAutoFix,
-  startIllustratePage, startPdf, getTaskStatus, branchStory,
+  startIllustratePage, startPdf, getTaskStatus, branchStory, deleteStory,
 } from "../api/client";
 import { useSSE } from "../hooks/useSSE";
 import type { SanityCheckResult, SSEEvent, BranchRequest } from "../api/types";
 import { usePipelineStore } from "../stores/pipelineStore";
 import { BranchDialog } from "../components/BranchDialog";
+import { ConfirmDeleteDialog } from "../components/ConfirmDeleteDialog";
 
 export function Review() {
   const { slug } = useParams<{ slug: string }>();
@@ -24,6 +25,9 @@ export function Review() {
   const [pdfTaskId, setPdfTaskId] = useState<string | null>(null);
   const [showBranch, setShowBranch] = useState(false);
   const [branching, setBranching] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ["story", slug],
@@ -149,6 +153,20 @@ export function Review() {
     }
   };
 
+  const handleDelete = async () => {
+    if (!slug) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteStory(slug);
+      navigate("/stories");
+    } catch (err) {
+      setDeleteError(String(err));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   if (isLoading) {
     return <div className="animate-pulse"><div className="h-8 bg-bark-100 rounded w-48 mb-6" /></div>;
   }
@@ -197,6 +215,12 @@ export function Review() {
             className="px-4 py-2 text-xs font-semibold text-white bg-sage-600 hover:bg-sage-700 disabled:opacity-60 rounded-[var(--radius-btn)] transition-colors"
           >
             {sanityTaskId ? "Checking..." : "Sanity Check All"}
+          </button>
+          <button
+            onClick={() => setShowDelete(true)}
+            className="px-4 py-2 text-xs font-medium text-red-600 bg-white border border-red-200 hover:bg-red-50 rounded-[var(--radius-btn)] transition-colors"
+          >
+            Delete
           </button>
         </div>
       </div>
@@ -458,6 +482,23 @@ export function Review() {
           branching={branching}
         />
       )}
+
+      {/* Delete dialog */}
+      <ConfirmDeleteDialog
+        open={showDelete}
+        onClose={() => setShowDelete(false)}
+        onConfirm={handleDelete}
+        title="Delete Story"
+        itemName={data.story.title}
+        details={[
+          `${data.story.keyframes.length} pages`,
+          ...(Object.keys(data.image_urls).length > 0 ? [`${Object.keys(data.image_urls).length} illustrations`] : []),
+          ...(data.has_pdf ? ["Has PDF"] : []),
+        ]}
+        warning="This will permanently delete the story, all illustrations, and PDFs. This cannot be undone."
+        isDeleting={deleting}
+        error={deleteError}
+      />
     </div>
   );
 }

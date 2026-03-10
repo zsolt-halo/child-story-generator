@@ -1,10 +1,15 @@
+import logging
+
 from src.brain.client import generate_text
 from src.brain.prompts import build_storyteller_system_prompt
 from src.models import BookConfig, Character
 
+logger = logging.getLogger(__name__)
+
 
 def generate_story(notes: str, character: Character, config: BookConfig, style_desc: str) -> tuple[str, str]:
     """Generate an expanded story from raw notes. Returns (title, prose)."""
+    logger.info("Generating story for %s (%d-page, narrator=%s)", character.child_name, config.pages, config.narrator)
     system_prompt = build_storyteller_system_prompt(
         character=character,
         narrator=config.narrator,
@@ -24,4 +29,5 @@ def generate_story(notes: str, character: Character, config: BookConfig, style_d
     title = lines[0].strip().strip("#").strip().strip('"').strip("*").strip()
     prose = lines[1].strip() if len(lines) > 1 else ""
 
+    logger.info("Story generated: '%s' (%d words)", title, len(prose.split()))
     return title, prose

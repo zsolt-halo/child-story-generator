@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import logging
 import uuid
 
 from src.models import Character, CharacterPersonality, CharacterVisual, CharacterStoryRules
 from src.utils.config import CHARACTERS_DIR, load_character
 from src.db.character_repository import CharacterRepository
 
+logger = logging.getLogger(__name__)
 _repo = CharacterRepository()
 
 
@@ -88,6 +90,7 @@ async def get_character(id: str) -> dict:
 
 async def create_character(data: dict) -> dict:
     """Create a new custom character from request data."""
+    logger.info("Creating character: %s (slug=%s)", data.get("name"), data.get("slug"))
     char = Character(
         name=data["name"],
         child_name=data["child_name"],
@@ -134,6 +137,7 @@ async def update_character(id: str, data: dict) -> dict:
 
 async def delete_character(id: str) -> None:
     """Delete a custom character. Rejects if referenced by stories."""
+    logger.info("Deleting character: %s", id)
     from src.db.engine import get_async_session_factory
     from src.db.models import StoryRow
     from sqlalchemy import select
@@ -205,6 +209,7 @@ async def polish_character(
     name: str, child_name: str, rough_description: str
 ) -> dict:
     """Use Gemini to polish a rough character concept into full details."""
+    logger.info("Polishing character: %s", name)
     import asyncio
 
     from src.brain.prompts import build_character_polish_prompt

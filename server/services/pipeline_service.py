@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import time as _time
 from datetime import datetime
 from pathlib import Path
 
@@ -10,10 +12,13 @@ from src.utils.io import slugify
 
 from server.services.task_manager import task_manager
 
+logger = logging.getLogger(__name__)
+
 
 async def _save(slug: str, story: Story, image_paths: list[str | Path] | None = None, metadata: dict | None = None):
     """Save story to DB via story_service."""
     from server.services.story_service import save_to_db
+    logger.debug("Saving checkpoint: slug=%s images=%s", slug, len(image_paths) if image_paths else 0)
     await save_to_db(slug, story, image_paths=image_paths, metadata=metadata)
 
 
@@ -43,6 +48,8 @@ async def run_full_pipeline(
     language: str | None,
 ) -> dict:
     """Run the full pipeline: story → keyframes → translation → illustrations → backdrops → PDF."""
+    logger.info("run_full_pipeline: task=%s character=%s style=%s pages=%d", task_id, character, style, pages)
+    t0 = _time.monotonic()
     config = build_config(character=character, narrator=narrator, style=style, pages=pages)
     char = await async_resolve_character(config.character)
     style_data = load_style(config.style)
@@ -53,8 +60,10 @@ async def run_full_pipeline(
     await task_manager.broadcast(task_id, {
         "type": "phase_start", "phase": "story", "message": "Generating story..."
     })
+    phase_t = _time.monotonic()
     from src.brain.storyteller import generate_story
     title, prose = await asyncio.to_thread(generate_story, notes, char, config, style_desc)
+    logger.info("Phase story completed in %.1fs", _time.monotonic() - phase_t)
     await task_manager.broadcast(task_id, {
         "type": "phase_complete", "phase": "story",
         "data": {"title": title, "word_count": len(prose.split())},
@@ -64,8 +73,10 @@ async def run_full_pipeline(
     await task_manager.broadcast(task_id, {
         "type": "phase_start", "phase": "keyframes", "message": "Breaking story into pages..."
     })
+    phase_t = _time.monotonic()
     from src.brain.keyframer import generate_keyframes
     story = await asyncio.to_thread(generate_keyframes, title, prose, char, config, style_desc)
+    logger.info("Phase keyframes completed in %.1fs", _time.monotonic() - phase_t)
     await task_manager.broadcast(task_id, {
         "type": "phase_complete", "phase": "keyframes",
         "data": {"page_count": len(story.keyframes)},
@@ -89,18 +100,20 @@ async def run_full_pipeline(
     await _save(slug, story, metadata=metadata)
 
     # Phase 2.5: Cast Extraction
-    if not story.cast:
-        await task_manager.broadcast(task_id, {
-            "type": "phase_start", "phase": "cast",
-            "message": "Analyzing character cast for consistency...",
-        })
-        from src.brain.cast_extractor import extract_cast
-        story = await asyncio.to_thread(extract_cast, story, char, config)
-        await _save(slug, story)
-        await task_manager.broadcast(task_id, {
-            "type": "phase_complete", "phase": "cast",
-            "data": {"cast_count": len(story.cast), "members": [m.model_dump() for m in story.cast]},
-        })
+    # Always run the dedicated extractor — Gemini's structured output may
+    # auto-populate story.cast with low-quality data from the keyframer schema.
+    story.cast = []
+    await task_manager.broadcast(task_id, {
+        "type": "phase_start", "phase": "cast",
+        "message": "Analyzing character cast for consistency...",
+    })
+    from src.brain.cast_extractor import extract_cast
+    story = await asyncio.to_thread(extract_cast, story, char, config)
+    await _save(slug, story)
+    await task_manager.broadcast(task_id, {
+        "type": "phase_complete", "phase": "cast",
+        "data": {"cast_count": len(story.cast), "members": [m.model_dump() for m in story.cast]},
+    })
 
     # Phase 2b: Translation
     if language:
@@ -143,6 +156,7 @@ async def run_full_pipeline(
         "data": {"total": len(story.keyframes)},
     })
 
+    phase_t = _time.monotonic()
     client = create_image_client(config)
     image_paths: list[Path] = []
 
@@ -152,6 +166,7 @@ async def run_full_pipeline(
 
         if final_path.exists():
             image_paths.append(final_path)
+            logger.debug("Image %s already exists, skipping", prefix)
             await task_manager.broadcast(task_id, {
                 "type": "image_complete", "page": kf.page_number,
                 "is_cover": kf.is_cover, "skipped": True,
@@ -160,6 +175,7 @@ async def run_full_pipeline(
             })
             continue
 
+        logger.info("Generating image %d/%d: %s", i + 1, len(story.keyframes), prefix)
         prompt = build_image_prompt(kf, char, style_anchor, title=cover_title, cast=story.cast or None)
         raw_path = images_dir / f"{prefix}_raw.png"
 
@@ -177,6 +193,7 @@ async def run_full_pipeline(
         if i < len(story.keyframes) - 1:
             await asyncio.sleep(5.0)
 
+    logger.info("Phase illustration completed in %.1fs", _time.monotonic() - phase_t)
     await _save(slug, story, [str(p) for p in image_paths])
     await task_manager.broadcast(task_id, {
         "type": "phase_complete", "phase": "illustration",
@@ -186,9 +203,11 @@ async def run_full_pipeline(
     await task_manager.broadcast(task_id, {
         "type": "phase_start", "phase": "backdrops", "message": "Generating backdrops..."
     })
+    phase_t = _time.monotonic()
     from src.artist.generator import generate_backdrops
     backdrops_dir = output_dir / "backdrops"
     backdrop_paths = await asyncio.to_thread(generate_backdrops, config, style_anchor, backdrops_dir)
+    logger.info("Phase backdrops completed in %.1fs", _time.monotonic() - phase_t)
     await task_manager.broadcast(task_id, {
         "type": "phase_complete", "phase": "backdrops",
         "data": {"count": len(backdrop_paths)},
@@ -198,13 +217,16 @@ async def run_full_pipeline(
     await task_manager.broadcast(task_id, {
         "type": "phase_start", "phase": "pdf", "message": "Rendering PDF..."
     })
+    phase_t = _time.monotonic()
     from src.publisher.layout import render_book_pdf
     pdf_path = output_dir / "book.pdf"
     await asyncio.to_thread(render_book_pdf, story, image_paths, pdf_path, backdrop_paths)
+    logger.info("Phase pdf completed in %.1fs", _time.monotonic() - phase_t)
     await task_manager.broadcast(task_id, {
         "type": "phase_complete", "phase": "pdf",
     })
 
+    logger.info("Full pipeline completed in %.1fs: slug=%s", _time.monotonic() - t0, slug)
     return {"slug": slug, "title": story.title}
 
 
@@ -220,6 +242,7 @@ async def run_story_only(
     parent_slug: str | None = None,
 ) -> dict:
     """Run Phase 1+2 only (story + keyframes)."""
+    logger.info("run_story_only: task=%s character=%s style=%s", task_id, character, style)
     config = build_config(character=character, narrator=narrator, style=style, pages=pages)
     char = await async_resolve_character(config.character)
     style_data = load_style(config.style)
@@ -263,19 +286,20 @@ async def run_story_only(
     await _save(slug, story, metadata=metadata)
 
     # Phase 2.5: Cast Extraction
-    if not story.cast:
-        await task_manager.broadcast(task_id, {
-            "type": "phase_start", "phase": "cast",
-            "message": "Analyzing character cast for consistency...",
-        })
-        from src.brain.cast_extractor import extract_cast
-        story = await asyncio.to_thread(extract_cast, story, char, config)
-        await _save(slug, story)
-        await task_manager.broadcast(task_id, {
-            "type": "phase_complete", "phase": "cast",
-            "data": {
-                "cast_count": len(story.cast),
-                "members": [m.model_dump() for m in story.cast],
+    # Always run the dedicated extractor (see run_full_pipeline comment)
+    story.cast = []
+    await task_manager.broadcast(task_id, {
+        "type": "phase_start", "phase": "cast",
+        "message": "Analyzing character cast for consistency...",
+    })
+    from src.brain.cast_extractor import extract_cast
+    story = await asyncio.to_thread(extract_cast, story, char, config)
+    await _save(slug, story)
+    await task_manager.broadcast(task_id, {
+        "type": "phase_complete", "phase": "cast",
+        "data": {
+            "cast_count": len(story.cast),
+            "members": [m.model_dump() for m in story.cast],
             },
         })
 
@@ -425,6 +449,7 @@ async def run_continue_pipeline(task_id: str, slug: str) -> dict:
     The pipeline pauses here for cover selection. After the user picks a cover,
     run_after_cover_selection() finishes with page illustrations → backdrops → PDF.
     """
+    logger.info("run_continue_pipeline: task=%s slug=%s", task_id, slug)
     from server.services.story_service import get_story
     story, image_paths, story_dir = await get_story(slug)
     config, meta = await _config_from_metadata(slug)
@@ -511,6 +536,7 @@ async def run_continue_pipeline(task_id: str, slug: str) -> dict:
 
 async def run_after_cover_selection(task_id: str, slug: str, choice: int) -> dict:
     """Continue pipeline after cover selection: copy cover → page illustrations → backdrops → PDF."""
+    logger.info("run_after_cover_selection: task=%s slug=%s choice=%d", task_id, slug, choice)
     import shutil
     from server.services.story_service import get_story
     story, existing_image_paths, story_dir = await get_story(slug)

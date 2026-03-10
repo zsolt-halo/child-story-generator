@@ -1,8 +1,11 @@
+import logging
 import uuid
 import tomllib
 from pathlib import Path
 
 from src.models import BookConfig, Character, CharacterPersonality, CharacterStoryRules, CharacterVisual
+
+logger = logging.getLogger(__name__)
 
 CONFIGS_DIR = Path(__file__).parent.parent.parent / "configs"
 CHARACTERS_DIR = CONFIGS_DIR / "characters"
@@ -62,8 +65,12 @@ def resolve_character(identifier: str) -> Character:
     if identifier.startswith("custom:"):
         char_id = uuid.UUID(identifier.removeprefix("custom:"))
         from src.db.character_repository import CharacterRepository
-        return CharacterRepository().get_by_id(char_id)
-    return load_character(identifier)
+        char = CharacterRepository().get_by_id(char_id)
+        logger.debug("Resolved character %s → %s (DB)", identifier, char.name)
+        return char
+    char = load_character(identifier)
+    logger.debug("Resolved character %s → %s (TOML)", identifier, char.name)
+    return char
 
 
 async def async_resolve_character(identifier: str) -> Character:
@@ -78,5 +85,9 @@ async def async_resolve_character(identifier: str) -> Character:
         char_id = uuid.UUID(identifier.removeprefix("custom:"))
         from src.db.character_repository import CharacterRepository, _row_to_character
         row = await CharacterRepository().async_get_by_id(char_id)
-        return _row_to_character(row)
-    return load_character(identifier)
+        char = _row_to_character(row)
+        logger.debug("Resolved character %s → %s (DB async)", identifier, char.name)
+        return char
+    char = load_character(identifier)
+    logger.debug("Resolved character %s → %s (TOML)", identifier, char.name)
+    return char

@@ -25,6 +25,11 @@ interface PipelineState {
   coverVariations: CoverVariation[];
   waitingForCoverSelection: boolean;
 
+  // Phase timing & detail tracking
+  phaseData: Record<string, Record<string, unknown>>;
+  phaseStartTime: number | null;
+  phaseElapsed: Record<string, number>;
+
   setTaskId: (id: string) => void;
   handleEvent: (event: SSEEvent) => void;
   setWaitingForCastReview: (v: boolean) => void;
@@ -48,6 +53,9 @@ const initialState = {
   waitingForCastReview: false,
   coverVariations: [] as CoverVariation[],
   waitingForCoverSelection: false,
+  phaseData: {} as Record<string, Record<string, unknown>>,
+  phaseStartTime: null as number | null,
+  phaseElapsed: {} as Record<string, number>,
 };
 
 export const usePipelineStore = create<PipelineState>((set) => ({
@@ -63,14 +71,28 @@ export const usePipelineStore = create<PipelineState>((set) => ({
             phase: event.phase ?? null,
             phaseMessage: event.message ?? null,
             imageTotal: event.data?.total as number ?? state.imageTotal,
+            phaseStartTime: Date.now(),
           };
         case "phase_complete": {
+          const phase = event.phase;
+          const startTime = state.phaseStartTime;
+          const elapsed = startTime ? Math.round((Date.now() - startTime) / 1000) : null;
+
           const updates: Partial<PipelineState> = {
             phaseMessage: null,
+            phaseStartTime: null,
             resultSlug: event.data?.slug as string ?? state.resultSlug,
           };
+          // Store per-phase completion data
+          if (phase && event.data) {
+            updates.phaseData = { ...state.phaseData, [phase]: event.data };
+          }
+          // Store per-phase elapsed time
+          if (phase && elapsed != null) {
+            updates.phaseElapsed = { ...state.phaseElapsed, [phase]: elapsed };
+          }
           // Capture cast members when cast phase completes
-          if (event.phase === "cast" && event.data?.members) {
+          if (phase === "cast" && event.data?.members) {
             updates.castMembers = event.data.members as CastMember[];
           }
           return updates;

@@ -19,6 +19,12 @@ from server.routers import stories, pipeline, config, sanity, characters
 
 load_dotenv()
 
+from server.logging_config import setup_logging
+setup_logging()
+
+import logging
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -29,9 +35,9 @@ async def lifespan(app: FastAPI):
         engine = get_async_engine()
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+        logger.info("Database tables verified")
     except Exception:
-        # DB not configured — skip (CLI-only or dev without PG)
-        pass
+        logger.debug("DB auto-create skipped (not configured)", exc_info=True)
     yield
 
 

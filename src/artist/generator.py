@@ -1,5 +1,6 @@
 import base64
 import io
+import logging
 import os
 import time
 from pathlib import Path
@@ -10,6 +11,8 @@ from PIL import Image
 from rich.progress import Progress
 
 from src.models import BookConfig, CastMember, Character, Keyframe
+
+logger = logging.getLogger(__name__)
 
 RETRY_DELAY = 10.0
 MAX_RETRIES = 5
@@ -85,6 +88,7 @@ def generate_single_image(
     else:
         contents = prompt
 
+    logger.debug("Generating image: %s (model=%s)", output_path.name, model)
     for attempt in range(MAX_RETRIES):
         try:
             response = client.models.generate_content(
@@ -101,11 +105,16 @@ def generate_single_image(
 
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_bytes(image_bytes)
+            logger.info("Image saved: %s (%d KB)", output_path.name, len(image_bytes) // 1024)
             return output_path
 
         except Exception as e:
             if attempt < MAX_RETRIES - 1:
                 delay = RETRY_DELAY * (2 ** attempt)  # exponential backoff: 10, 20, 40, 80s
+                logger.warning(
+                    "Image gen attempt %d/%d failed: %s — retrying in %.0fs",
+                    attempt + 1, MAX_RETRIES, e, delay,
+                )
                 time.sleep(delay)
             else:
                 raise RuntimeError(f"Image generation failed after {MAX_RETRIES} attempts: {e}") from e
@@ -145,6 +154,7 @@ def generate_reference_sheet(
     final_path = output_dir / "reference_sheet.png"
 
     if final_path.exists():
+        logger.debug("Reference sheet already exists, skipping")
         return final_path
 
     prompt = (
@@ -160,12 +170,14 @@ def generate_reference_sheet(
     )
 
     try:
+        logger.info("Generating reference sheet for %s", character.name)
         client = create_image_client(config)
         raw_path = output_dir / "reference_sheet_raw.png"
         generate_single_image(client, prompt, config.image_model, raw_path)
         upscale_for_print(raw_path, final_path)
         return final_path
     except Exception:
+        logger.warning("Reference sheet generation failed", exc_info=True)
         return None
 
 

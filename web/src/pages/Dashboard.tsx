@@ -1,13 +1,35 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { listStories } from "../api/client";
+import { listStories, deleteStory } from "../api/client";
 import { StoryCard } from "../components/StoryCard";
+import { ConfirmDeleteDialog } from "../components/ConfirmDeleteDialog";
+import type { StoryListItem } from "../api/types";
 
 export function Dashboard() {
+  const queryClient = useQueryClient();
+  const [deleteTarget, setDeleteTarget] = useState<StoryListItem | null>(null);
+
   const { data: stories, isLoading } = useQuery({
     queryKey: ["stories"],
     queryFn: listStories,
   });
+
+  const deleteMutation = useMutation({
+    mutationFn: (slug: string) => deleteStory(slug),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["stories"] });
+      setDeleteTarget(null);
+    },
+  });
+
+  const deleteDetails = deleteTarget
+    ? [
+        `${deleteTarget.page_count} pages`,
+        ...(deleteTarget.has_images ? ["Illustrated"] : []),
+        ...(deleteTarget.has_pdf ? ["Has PDF"] : []),
+      ]
+    : [];
 
   return (
     <div>
@@ -42,7 +64,11 @@ export function Dashboard() {
       ) : stories && stories.length > 0 ? (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
           {stories.map((story) => (
-            <StoryCard key={story.slug} story={story} />
+            <StoryCard
+              key={story.slug}
+              story={story}
+              onDelete={() => setDeleteTarget(story)}
+            />
           ))}
         </div>
       ) : (
@@ -62,6 +88,18 @@ export function Dashboard() {
           </Link>
         </div>
       )}
+
+      <ConfirmDeleteDialog
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.slug)}
+        title="Delete Story"
+        itemName={deleteTarget?.title ?? ""}
+        details={deleteDetails}
+        warning="This will permanently delete the story, all illustrations, and PDFs. This cannot be undone."
+        isDeleting={deleteMutation.isPending}
+        error={deleteMutation.error ? String(deleteMutation.error) : null}
+      />
     </div>
   );
 }

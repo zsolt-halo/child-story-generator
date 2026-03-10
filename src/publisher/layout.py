@@ -1,3 +1,4 @@
+import logging
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -6,6 +7,8 @@ from jinja2 import Environment, FileSystemLoader
 from weasyprint import HTML
 
 from src.models import Keyframe, Story
+
+logger = logging.getLogger(__name__)
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 
@@ -50,6 +53,7 @@ def render_book_pdf(
     backdrop_paths: list[Path] | None = None,
 ) -> Path:
     """Render the final book PDF using WeasyPrint."""
+    logger.info("Rendering PDF: %d pages, %d images → %s", len(story.keyframes), len(image_paths), output_path.name)
     env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)))
     template = env.get_template("page.html")
 
@@ -73,6 +77,7 @@ def render_book_pdf(
     html_path.write_text(html_content, encoding="utf-8")
 
     HTML(string=html_content, base_url=str(TEMPLATES_DIR)).write_pdf(str(output_path))
+    logger.info("Print PDF written: %s (%.1f MB)", output_path.name, output_path.stat().st_size / 1_048_576)
 
     # Generate a lightweight screen-quality PDF for sharing
     screen_path = output_path.with_stem(output_path.stem + "-screen")
@@ -139,6 +144,7 @@ def render_screen_pdf(print_pdf: Path, output_path: Path, dpi: int = 120) -> Pat
         doc.close()
         return output_path
     except Exception:
+        logger.warning("PyMuPDF compression failed, trying Ghostscript", exc_info=True)
         # Fallback: try Ghostscript if PyMuPDF fails
         try:
             subprocess.run(
@@ -156,4 +162,5 @@ def render_screen_pdf(print_pdf: Path, output_path: Path, dpi: int = 120) -> Pat
             )
             return output_path
         except (FileNotFoundError, subprocess.CalledProcessError):
+            logger.warning("Screen PDF compression unavailable (no PyMuPDF or Ghostscript)")
             return None

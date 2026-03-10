@@ -1,9 +1,11 @@
 import asyncio
-import traceback
+import logging
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Coroutine
+
+logger = logging.getLogger(__name__)
 
 
 class TaskStatus(str, Enum):
@@ -36,19 +38,22 @@ class TaskManager:
         task_id = uuid.uuid4().hex[:12]
         info = TaskInfo(task_id=task_id)
         self._tasks[task_id] = info
+        logger.info("Task created: %s", task_id)
 
         async def _run():
             info.status = TaskStatus.RUNNING
+            logger.info("Task started: %s", task_id)
             await self.broadcast(task_id, {"type": "task_start", "task_id": task_id})
             try:
                 result = await coro_fn(task_id, *args, **kwargs)
                 info.status = TaskStatus.COMPLETED
                 info.result = result or {}
+                logger.info("Task completed: %s", task_id)
                 await self.broadcast(task_id, {"type": "task_complete", "task_id": task_id, "result": info.result})
             except Exception as e:
                 info.status = TaskStatus.FAILED
                 info.error = str(e)
-                traceback.print_exc()
+                logger.error("Task %s failed: %s", task_id, e, exc_info=True)
                 await self.broadcast(task_id, {"type": "error", "task_id": task_id, "error": str(e)})
 
         self._asyncio_tasks[task_id] = asyncio.create_task(_run())

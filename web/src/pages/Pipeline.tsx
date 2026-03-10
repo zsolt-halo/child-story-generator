@@ -16,6 +16,7 @@ export function Pipeline() {
     images, imageProgress, imageTotal, resultSlug,
     castMembers, waitingForCastReview,
     coverVariations, waitingForCoverSelection,
+    phaseData, phaseElapsed, phaseStartTime,
     setTaskId, handleEvent, setWaitingForCastReview, setWaitingForCoverSelection,
   } = usePipelineStore();
   const [approving, setApproving] = useState(false);
@@ -111,6 +112,12 @@ export function Pipeline() {
             failed={failed}
             waitingForCastReview={waitingForCastReview}
             waitingForCoverSelection={waitingForCoverSelection}
+            phaseMessage={phaseMessage}
+            phaseData={phaseData}
+            phaseElapsed={phaseElapsed}
+            phaseStartTime={phaseStartTime}
+            imageProgress={imageProgress}
+            imageTotal={imageTotal}
           />
         </div>
 

@@ -1,10 +1,15 @@
+import logging
+
 from src.brain.client import generate_structured
 from src.brain.prompts import build_keyframer_system_prompt
 from src.models import BookConfig, Character, Story
 
+logger = logging.getLogger(__name__)
+
 
 def generate_keyframes(title: str, prose: str, character: Character, config: BookConfig, style_desc: str) -> Story:
     """Break a story into illustrated page keyframes using structured output."""
+    logger.info("Generating keyframes for '%s' (%d pages)", title, config.pages)
     system_prompt = build_keyframer_system_prompt(
         character=character,
         style_desc=style_desc,
@@ -18,4 +23,6 @@ def generate_keyframes(title: str, prose: str, character: Character, config: Boo
         f'Set the title to "{title}" and optionally add a short dedication for {character.child_name}.'
     )
 
-    return generate_structured(config, system_prompt, user_prompt, schema=Story, max_tokens=16384)
+    story = generate_structured(config, system_prompt, user_prompt, schema=Story, max_tokens=16384)
+    logger.info("Keyframes generated: %d pages", len(story.keyframes))
+    return story

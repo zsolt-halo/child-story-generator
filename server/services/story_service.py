@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -8,6 +9,7 @@ from src.models import Story, CastMember
 from src.db.repository import StoryRepository
 from server.schemas import StoryListItem
 
+logger = logging.getLogger(__name__)
 
 STORIES_DIR = Path("stories")
 _repo = StoryRepository()
@@ -45,6 +47,7 @@ async def update_story(
 
 async def delete_story(slug: str):
     """Delete a story from DB and disk."""
+    logger.info("Deleting story: %s", slug)
     await _repo.async_delete(slug)
     story_dir = STORIES_DIR / slug
     if story_dir.exists():
@@ -79,6 +82,7 @@ async def branch_story(source_slug: str, new_config: dict, start_from: str) -> t
 
     start_from: "full" = regenerate everything, "illustration" = keep story, new illustrations.
     """
+    logger.info("Branching story %s (start_from=%s)", source_slug, start_from)
     from src.utils.io import slugify
 
     story, image_paths, source_dir = await get_story(source_slug)
