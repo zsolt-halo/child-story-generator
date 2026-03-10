@@ -94,11 +94,12 @@ async def start_backdrops(slug: str):
 
 
 @router.post("/continue/{slug}", response_model=TaskResponse)
-async def continue_pipeline(slug: str):
+async def continue_pipeline(slug: str, cast_edited: bool = False):
     """Continue pipeline after cast review: translate → illustrate → backdrops → PDF."""
     task_id = task_manager.create_task(
         pipeline_service.run_continue_pipeline,
         slug=slug,
+        cast_edited=cast_edited,
         exclusive=True,
     )
     return TaskResponse(task_id=task_id)

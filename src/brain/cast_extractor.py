@@ -54,6 +54,19 @@ def extract_cast(story: Story, character: Character, config: BookConfig) -> Stor
         return story
 
     # Step 2: Rewrite keyframe visual descriptions with canonical cast info
+    return rewrite_cast_visuals(story, character, config)
+
+
+def rewrite_cast_visuals(story: Story, character: Character, config: BookConfig) -> Story:
+    """Rewrite keyframe visual descriptions using the current cast sheet.
+
+    Can be called standalone (e.g. after user edits cast during review) or
+    as part of the full extract_cast() flow.
+    """
+    members = story.cast or []
+    if not members:
+        return story
+
     rewrite_prompt = build_cast_rewrite_prompt(character)
 
     # Build the cast sheet section
@@ -84,6 +97,8 @@ def extract_cast(story: Story, character: Character, config: BookConfig) -> Stor
         f"Rewrite ALL {len(story.keyframes)} visual descriptions with consistent cast visuals."
     )
 
+    logger.info("Rewriting %d keyframe visuals with cast sheet (%d members)",
+                len(story.keyframes), len(members))
     raw = generate_text(config, rewrite_prompt, rewrite_user_prompt, max_tokens=16384)
 
     # Parse delimiter-based output

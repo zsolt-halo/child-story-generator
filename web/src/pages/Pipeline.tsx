@@ -50,10 +50,12 @@ export function Pipeline() {
     if (!resultSlug) return;
     setApproving(true);
     try {
+      // Detect whether the user actually changed anything
+      const castEdited = JSON.stringify(cast) !== JSON.stringify(castMembers);
       // Save edited cast
       await updateStory(resultSlug, { cast });
       // Continue pipeline (translate → ref sheet → cover variations → pause)
-      const res = await continuePipeline(resultSlug);
+      const res = await continuePipeline(resultSlug, castEdited);
       // setTaskId resets entire store (including waitingForCastReview)
       setTaskId(res.task_id);
     } catch (err) {
@@ -61,7 +63,7 @@ export function Pipeline() {
     } finally {
       setApproving(false);
     }
-  }, [resultSlug, setTaskId]);
+  }, [resultSlug, castMembers, setTaskId]);
 
   const handleCoverSelect = useCallback(async (choice: number) => {
     if (!resultSlug) return;

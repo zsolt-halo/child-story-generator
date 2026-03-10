@@ -58,8 +58,8 @@ export const startIllustratePage = (slug: string, page: number) =>
   request<TaskResponse>(`/pipeline/illustrate/${slug}/${page}`, { method: "POST" });
 export const startBackdrops = (slug: string) =>
   request<TaskResponse>(`/pipeline/backdrops/${slug}`, { method: "POST" });
-export const continuePipeline = (slug: string) =>
-  request<TaskResponse>(`/pipeline/continue/${slug}`, { method: "POST" });
+export const continuePipeline = (slug: string, castEdited = false) =>
+  request<TaskResponse>(`/pipeline/continue/${slug}?cast_edited=${castEdited}`, { method: "POST" });
 export const selectCoverAndContinue = (slug: string, choice: number) =>
   request<TaskResponse>(`/pipeline/select-cover/${slug}`, {
     method: "POST",

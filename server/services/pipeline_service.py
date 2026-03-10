@@ -394,14 +394,23 @@ async def run_backdrops(task_id: str, slug: str) -> dict:
     return {"slug": slug, "backdrop_count": len(backdrop_paths)}
 
 
-async def run_continue_pipeline(task_id: str, slug: str) -> dict:
+async def run_continue_pipeline(task_id: str, slug: str, cast_edited: bool = False) -> dict:
     """Continue pipeline after cast review: translate → ref sheet → cover variations → STOP.
 
     The pipeline pauses here for cover selection. After the user picks a cover,
     run_after_cover_selection() finishes with page illustrations → backdrops → PDF.
     """
-    logger.info("run_continue_pipeline: task=%s slug=%s", task_id, slug)
+    logger.info("run_continue_pipeline: task=%s slug=%s cast_edited=%s", task_id, slug, cast_edited)
     ctx = await _load_pipeline_context(slug)
+
+    # Phase 2.5b: Re-run cast rewrite only if the user actually edited the cast
+    # during review. This avoids an unnecessary Gemini API call when approving unchanged.
+    if cast_edited and ctx.story.cast:
+        from src.brain.cast_extractor import rewrite_cast_visuals
+        async with _phase(task_id, "cast_rewrite", "Applying cast edits to illustrations...") as r:
+            ctx.story = await asyncio.to_thread(rewrite_cast_visuals, ctx.story, ctx.char, ctx.config)
+            await _save(slug, ctx.story, [str(p) for p in ctx.image_paths])
+            r.update(cast_count=len(ctx.story.cast))
 
     # Phase 2b: Translation (if language configured and not already done)
     if ctx.language and not ctx.story.title_translated:

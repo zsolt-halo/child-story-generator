@@ -4,6 +4,7 @@ const PHASES = [
   { key: "story", label: "Story Generation" },
   { key: "keyframes", label: "Page Keyframes" },
   { key: "cast", label: "Cast Extraction" },
+  { key: "cast_rewrite", label: "Cast Consistency" },
   { key: "translation", label: "Translation" },
   { key: "reference_sheet", label: "Reference Sheet" },
   { key: "cover_variations", label: "Cover Options" },
@@ -31,6 +32,8 @@ function PhaseIcon({ phaseKey }: { phaseKey: string }) {
       return <svg {...p}><path d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" /></svg>;
     case "cast":
       return <svg {...p}><path d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0112.75 0v.109zM12 9.75a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" /></svg>;
+    case "cast_rewrite":
+      return <svg {...p}><path d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182" /></svg>;
     case "translation":
       return <svg {...p}><path d="M10.5 21l5.25-11.25L21 21m-9-3h7.5M3 5.621a48.474 48.474 0 016-.371m0 0c1.12 0 2.233.038 3.334.114M9 5.25V3m3.334 2.364C11.176 10.658 7.69 15.08 3 17.502m9.334-12.138c.896.061 1.785.147 2.666.257m-4.589 8.495a18.023 18.023 0 01-3.827-5.802" /></svg>;
     case "reference_sheet":
@@ -60,6 +63,8 @@ function formatPhaseDetail(key: string, data: Record<string, unknown>): string |
       return data.cast_count
         ? `${data.cast_count} character${Number(data.cast_count) !== 1 ? "s" : ""} identified`
         : null;
+    case "cast_rewrite":
+      return "Scene descriptions updated";
     case "translation":
       return data.translated_title ? `"${data.translated_title}"` : null;
     case "reference_sheet":

@@ -132,7 +132,8 @@ The book will be illustrated in a {style_desc} style. Keep visual descriptions c
 - Write prose only — no stage directions, no illustration notes. Those come later.
 - The child's name is {character.child_name}. The protagonist ({character.name}) mirrors what {character.child_name} did that day.
 - End the story with a warm, satisfying conclusion that circles back to the beginning.
-- Create a short, evocative title for the book."""
+- Create a short, evocative title for the book.
+- **Preserve user-given names**: If the parent's notes name any character (e.g., "met her friend Lili", "played with Bence"), keep those EXACT names in the story. You may embellish their role, species, or personality, but NEVER rename them."""
 
 
 def build_keyframer_system_prompt(character: Character, style_desc: str) -> str:
@@ -194,7 +195,7 @@ The protagonist is a **{species}**.
 
 ## Instructions
 For each secondary character you identify:
-1. **name**: Their name as used in the story (e.g., "Papa Llama", "Hedvig", "Bence")
+1. **name**: Their name EXACTLY as it appears in the story — never rename characters (e.g., "Papa Llama", "Hedvig", "Bence")
 2. **role**: Their relationship/role (e.g., "father", "best friend", "baby brother")
 3. **species**: What species they are (following the rules above)
 4. **visual_description**: A DETAILED, SPECIFIC visual description for image generation. Include body type/size/age, fur/hair/skin color, distinguishing features, facial expression tendency. Be specific enough that an image model produces the same character every time.
