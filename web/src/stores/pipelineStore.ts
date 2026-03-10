@@ -32,8 +32,6 @@ interface PipelineState {
 
   setTaskId: (id: string) => void;
   handleEvent: (event: SSEEvent) => void;
-  setWaitingForCastReview: (v: boolean) => void;
-  setWaitingForCoverSelection: (v: boolean) => void;
   reset: () => void;
 }
 
@@ -119,18 +117,25 @@ export const usePipelineStore = create<PipelineState>((set) => ({
             ],
           };
         case "task_complete": {
-          const slug = (event.result?.slug as string) ?? state.resultSlug;
-          const hasCast = state.castMembers.length > 0;
+          const result = event.result ?? {};
+          const slug = (result.slug as string) ?? state.resultSlug;
+          const hasCast = state.castMembers.length > 0 || (result.cast_count as number) > 0;
+
+          // Use cover variations from result as fallback if SSE events were missed
+          const resultCovers = result.cover_variations as CoverVariation[] | undefined;
+          const covers = resultCovers?.length ? resultCovers : state.coverVariations;
+
           // If this was a story-only task (cast present, no images), pause for cast review
-          const shouldWaitCast = hasCast && state.images.length === 0 && state.coverVariations.length === 0;
+          const shouldWaitCast = hasCast && state.images.length === 0 && covers.length === 0;
           // If cover variations were generated, pause for cover selection
-          const shouldWaitCover = state.coverVariations.length > 0;
+          const shouldWaitCover = covers.length > 0;
           return {
             completed: true,
             resultSlug: slug,
-            resultTitle: (event.result?.title as string) ?? state.resultTitle,
+            resultTitle: (result.title as string) ?? state.resultTitle,
             waitingForCastReview: shouldWaitCast,
             waitingForCoverSelection: shouldWaitCover,
+            coverVariations: covers,
           };
         }
         case "error":
@@ -139,10 +144,6 @@ export const usePipelineStore = create<PipelineState>((set) => ({
           return {};
       }
     }),
-
-  setWaitingForCastReview: (v) => set({ waitingForCastReview: v }),
-
-  setWaitingForCoverSelection: (v) => set({ waitingForCoverSelection: v }),
 
   reset: () => set(initialState),
 }));

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { usePipelineStore } from "../stores/pipelineStore";
 import { useSSE } from "../hooks/useSSE";
@@ -17,18 +17,21 @@ export function Pipeline() {
     castMembers, waitingForCastReview,
     coverVariations, waitingForCoverSelection,
     phaseData, phaseElapsed, phaseStartTime,
-    setTaskId, handleEvent, setWaitingForCastReview, setWaitingForCoverSelection,
+    setTaskId, handleEvent,
   } = usePipelineStore();
   const [approving, setApproving] = useState(false);
   const [selectingCover, setSelectingCover] = useState(false);
 
-  // Pick up taskId from navigation state (from NewStory page)
+  // Pick up taskId from navigation state (from NewStory page) — consume only once
+  const consumedStateRef = useRef(false);
   useEffect(() => {
+    if (consumedStateRef.current) return;
     const stateTaskId = (location.state as { taskId?: string } | null)?.taskId;
-    if (stateTaskId && stateTaskId !== taskId) {
+    if (stateTaskId) {
+      consumedStateRef.current = true;
       setTaskId(stateTaskId);
     }
-  }, [location.state, taskId, setTaskId]);
+  }, [location.state, setTaskId]);
 
   useSSE(taskId, "/api/pipeline/progress", handleEvent);
 
@@ -48,30 +51,30 @@ export function Pipeline() {
     try {
       // Save edited cast
       await updateStory(resultSlug, { cast });
-      // Continue pipeline (translate → illustrate → backdrops → PDF)
+      // Continue pipeline (translate → ref sheet → cover variations → pause)
       const res = await continuePipeline(resultSlug);
-      setWaitingForCastReview(false);
+      // setTaskId resets entire store (including waitingForCastReview)
       setTaskId(res.task_id);
     } catch (err) {
       console.error("Failed to continue pipeline:", err);
     } finally {
       setApproving(false);
     }
-  }, [resultSlug, setTaskId, setWaitingForCastReview]);
+  }, [resultSlug, setTaskId]);
 
   const handleCoverSelect = useCallback(async (choice: number) => {
     if (!resultSlug) return;
     setSelectingCover(true);
     try {
       const res = await selectCoverAndContinue(resultSlug, choice);
-      setWaitingForCoverSelection(false);
+      // setTaskId resets entire store (including waitingForCoverSelection)
       setTaskId(res.task_id);
     } catch (err) {
       console.error("Failed to continue after cover selection:", err);
     } finally {
       setSelectingCover(false);
     }
-  }, [resultSlug, setTaskId, setWaitingForCoverSelection]);
+  }, [resultSlug, setTaskId]);
 
   if (!taskId) {
     return (

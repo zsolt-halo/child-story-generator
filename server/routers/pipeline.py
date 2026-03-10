@@ -168,6 +168,8 @@ async def stream_progress(task_id: str):
                     yield f": keepalive\n\n"
         except asyncio.CancelledError:
             pass
+        finally:
+            task_manager.unsubscribe(task_id, queue)
 
     return StreamingResponse(
         event_stream(),
