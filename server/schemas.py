@@ -1,5 +1,12 @@
 from pydantic import BaseModel
 
+from src.models import CharacterPersonality, CharacterStoryRules, CharacterVisual
+
+# Re-export src.models schemas — avoids duplicating identical Pydantic definitions
+CharacterPersonalitySchema = CharacterPersonality
+CharacterVisualSchema = CharacterVisual
+CharacterStoryRulesSchema = CharacterStoryRules
+
 
 class StoryListItem(BaseModel):
     slug: str
@@ -84,22 +91,6 @@ class SanityCheckResult(BaseModel):
     status: str  # pass, trivial, major
     issues: list[SanityIssue] = []
     suggested_visual_description: str | None = None
-
-
-class CharacterPersonalitySchema(BaseModel):
-    traits: list[str]
-    speech_style: str
-
-
-class CharacterVisualSchema(BaseModel):
-    description: str
-    constants: str
-    color_palette: list[str] = []
-
-
-class CharacterStoryRulesSchema(BaseModel):
-    always: str
-    never: str
 
 
 class CharacterDetail(BaseModel):

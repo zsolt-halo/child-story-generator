@@ -35,6 +35,10 @@ class Keyframe(BaseModel):
     is_cover: bool = False
     page_text_translated: str | None = None
 
+    @property
+    def image_prefix(self) -> str:
+        return "cover" if self.is_cover else f"page_{self.page_number:02d}"
+
 
 class CastMember(BaseModel):
     name: str

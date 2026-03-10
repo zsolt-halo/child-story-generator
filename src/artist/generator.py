@@ -249,8 +249,7 @@ def generate_all_illustrations(
     client = None  # Lazy init — only create if we need to generate
 
     for kf in keyframes:
-        prefix = "cover" if kf.is_cover else f"page_{kf.page_number:02d}"
-        final_path = output_dir / f"{prefix}.png"
+        final_path = output_dir / f"{kf.image_prefix}.png"
 
         if final_path.exists():
             # Skip already-generated images
@@ -264,7 +263,7 @@ def generate_all_illustrations(
 
         prompt = build_image_prompt(kf, character, style_anchor, title=title, cast=cast)
 
-        raw_path = output_dir / f"{prefix}_raw.png"
+        raw_path = output_dir / f"{kf.image_prefix}_raw.png"
         generate_single_image(client, prompt, config.image_model, raw_path, reference_image=reference_image)
 
         upscale_for_print(raw_path, final_path)

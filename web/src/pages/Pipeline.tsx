@@ -188,7 +188,6 @@ export function Pipeline() {
           {/* Cover selection panel */}
           {waitingForCoverSelection && (
             <CoverSelectionPanel
-              slug={resultSlug || ""}
               variations={coverVariations}
               onSelect={handleCoverSelect}
               selecting={selectingCover}

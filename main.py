@@ -287,11 +287,8 @@ def pdf(story_dir: Path, language: str):
         console.print(f"[red]Missing {len(missing)} images. Run 'generate --resume' first.[/red]")
         raise SystemExit(1)
 
-    # Discover backdrops if they exist
-    backdrops_dir = story_dir / "backdrops"
-    backdrop_paths = sorted(backdrops_dir.glob("backdrop_*.png")) if backdrops_dir.exists() else []
-    # Filter out raw files
-    backdrop_paths = [p for p in backdrop_paths if "_raw" not in p.name]
+    from src.utils.io import discover_backdrops
+    backdrop_paths = discover_backdrops(story_dir)
 
     if backdrop_paths:
         console.print(f"[green]Backdrops:[/green] {len(backdrop_paths)} found")

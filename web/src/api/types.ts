@@ -126,7 +126,6 @@ export interface SSEEvent {
   progress?: number;
   total?: number;
   skipped?: boolean;
-  task_id?: string;
   result?: Record<string, unknown>;
   error?: string;
   index?: number;

@@ -2,7 +2,6 @@ import { useState } from "react";
 import type { CoverVariation } from "../api/types";
 
 interface CoverSelectionPanelProps {
-  slug: string;
   variations: CoverVariation[];
   onSelect: (choice: number) => void;
   selecting?: boolean;

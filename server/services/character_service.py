@@ -38,27 +38,9 @@ def _row_to_dict(row) -> dict:
 
 def _toml_to_dict(slug: str, char: Character) -> dict:
     """Convert a TOML-loaded Character to an API-friendly dict."""
-    return {
-        "id": None,
-        "slug": slug,
-        "name": char.name,
-        "child_name": char.child_name,
-        "personality": {
-            "traits": char.personality.traits,
-            "speech_style": char.personality.speech_style,
-        },
-        "visual": {
-            "description": char.visual.description,
-            "constants": char.visual.constants,
-            "color_palette": char.visual.color_palette,
-        },
-        "story_rules": {
-            "always": char.story_rules.always,
-            "never": char.story_rules.never,
-        },
-        "is_template": True,
-        "pipeline_id": slug,
-    }
+    d = char.model_dump()
+    d.update(id=None, slug=slug, is_template=True, pipeline_id=slug)
+    return d
 
 
 async def list_all_characters() -> list[dict]:
@@ -183,25 +165,8 @@ async def duplicate_character(id: str) -> dict:
 async def duplicate_template(slug: str) -> dict:
     """Duplicate a TOML template as a new custom character."""
     char = load_character(slug)
-    new_slug = f"{slug}-custom"
-    data = {
-        "slug": new_slug,
-        "name": char.name,
-        "child_name": char.child_name,
-        "personality": {
-            "traits": char.personality.traits,
-            "speech_style": char.personality.speech_style,
-        },
-        "visual": {
-            "description": char.visual.description,
-            "constants": char.visual.constants,
-            "color_palette": char.visual.color_palette,
-        },
-        "story_rules": {
-            "always": char.story_rules.always,
-            "never": char.story_rules.never,
-        },
-    }
+    data = char.model_dump()
+    data["slug"] = f"{slug}-custom"
     return await create_character(data)
 
 
@@ -233,18 +198,5 @@ async def polish_character(
         max_tokens=4096,
     )
 
-    return {
-        "personality": {
-            "traits": result.personality.traits,
-            "speech_style": result.personality.speech_style,
-        },
-        "visual": {
-            "description": result.visual.description,
-            "constants": result.visual.constants,
-            "color_palette": result.visual.color_palette,
-        },
-        "story_rules": {
-            "always": result.story_rules.always,
-            "never": result.story_rules.never,
-        },
-    }
+    d = result.model_dump()
+    return {k: d[k] for k in ("personality", "visual", "story_rules")}

@@ -14,41 +14,12 @@ def slugify(text: str, max_len: int = 40) -> str:
     return slug[:max_len].rstrip("-")
 
 
-def ensure_dir(path: Path) -> Path:
-    """Create directory if it doesn't exist and return it."""
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
-def save_checkpoint(
-    output_dir: Path,
-    story: Story,
-    image_paths: list[str] | None = None,
-    metadata: dict | None = None,
-):
-    """Save pipeline state so we can resume later.
-
-    If metadata is provided, it overwrites any existing metadata.
-    If metadata is None, existing metadata is preserved.
-    """
-    output_dir.mkdir(parents=True, exist_ok=True)
-    data: dict = {
-        "story": story.model_dump(),
-        "image_paths": image_paths or [],
-    }
-    if metadata is not None:
-        data["metadata"] = metadata
-    else:
-        # Preserve existing metadata
-        checkpoint = output_dir / CHECKPOINT_FILE
-        if checkpoint.exists():
-            try:
-                old = json.loads(checkpoint.read_text())
-                if "metadata" in old:
-                    data["metadata"] = old["metadata"]
-            except (json.JSONDecodeError, KeyError):
-                pass
-    (output_dir / CHECKPOINT_FILE).write_text(json.dumps(data, indent=2))
+def discover_backdrops(story_dir: Path) -> list[Path]:
+    """Find finished backdrop images in a story directory (excludes raw files)."""
+    backdrops_dir = story_dir / "backdrops"
+    if not backdrops_dir.exists():
+        return []
+    return [p for p in sorted(backdrops_dir.glob("backdrop_*.png")) if "_raw" not in p.name]
 
 
 def load_checkpoint(output_dir: Path) -> tuple[Story, list[Path]]:
@@ -59,13 +30,3 @@ def load_checkpoint(output_dir: Path) -> tuple[Story, list[Path]]:
     return story, image_paths
 
 
-def load_metadata(output_dir: Path) -> dict | None:
-    """Load metadata from checkpoint, or None if not present."""
-    checkpoint = output_dir / CHECKPOINT_FILE
-    if not checkpoint.exists():
-        return None
-    try:
-        data = json.loads(checkpoint.read_text())
-        return data.get("metadata")
-    except (json.JSONDecodeError, KeyError):
-        return None

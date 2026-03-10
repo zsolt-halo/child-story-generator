@@ -121,7 +121,7 @@ def _story_to_row(
             mood=kf.mood,
             is_cover=kf.is_cover,
             page_text_translated=kf.page_text_translated,
-            has_image=_image_prefix_for_kf(kf) in image_page_set,
+            has_image=kf.image_prefix in image_page_set,
         )
         for kf in story.keyframes
     ]
@@ -139,11 +139,6 @@ def _story_to_row(
     ]
 
     return row
-
-
-def _image_prefix_for_kf(kf: Keyframe) -> str:
-    """Derive image filename prefix from a Pydantic Keyframe."""
-    return "cover" if kf.is_cover else f"page_{kf.page_number:02d}"
 
 
 def _row_to_metadata(row: StoryRow) -> dict | None:
@@ -452,7 +447,7 @@ class StoryRepository:
                     mood=kf.mood,
                     is_cover=kf.is_cover,
                     page_text_translated=kf.page_text_translated,
-                    has_image=_image_prefix_for_kf(kf) in image_page_set,
+                    has_image=kf.image_prefix in image_page_set,
                 )
             )
 
@@ -522,7 +517,7 @@ class StoryRepository:
                     mood=kf.mood,
                     is_cover=kf.is_cover,
                     page_text_translated=kf.page_text_translated,
-                    has_image=_image_prefix_for_kf(kf) in image_page_set,
+                    has_image=kf.image_prefix in image_page_set,
                 )
             )
 

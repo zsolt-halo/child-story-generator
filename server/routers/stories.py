@@ -28,17 +28,15 @@ async def get_story_detail(slug: str):
     images_dir = story_dir / "images"
     image_urls = {}
     for kf in story.keyframes:
-        prefix = "cover" if kf.is_cover else f"page_{kf.page_number:02d}"
-        img = images_dir / f"{prefix}.png"
+        img = images_dir / f"{kf.image_prefix}.png"
         if img.exists():
-            image_urls[kf.page_number] = f"/api/stories/{slug}/images/{prefix}.png"
+            image_urls[kf.page_number] = f"/api/stories/{slug}/images/{kf.image_prefix}.png"
 
-    backdrops_dir = story_dir / "backdrops"
-    backdrop_urls = []
-    if backdrops_dir.exists():
-        for p in sorted(backdrops_dir.glob("backdrop_*.png")):
-            if "_raw" not in p.name:
-                backdrop_urls.append(f"/api/stories/{slug}/images/../backdrops/{p.name}")
+    from src.utils.io import discover_backdrops
+    backdrop_urls = [
+        f"/api/stories/{slug}/images/../backdrops/{p.name}"
+        for p in discover_backdrops(story_dir)
+    ]
 
     metadata = await get_metadata(slug)
 
