@@ -3,9 +3,12 @@ import type { StoryListItem } from "../api/types";
 import { FadeImage } from "./FadeImage";
 
 export function StoryCard({ story, onDelete }: { story: StoryListItem; onDelete?: () => void }) {
-  const linkTo = story.has_images
-    ? `/stories/${story.slug}/review`
-    : `/stories/${story.slug}/storyboard`;
+  const isPaused = story.pipeline_status === "story_review" || story.pipeline_status === "cast_review";
+  const linkTo = isPaused
+    ? `/stories/${story.slug}/pipeline`
+    : story.has_images
+      ? `/stories/${story.slug}/review`
+      : `/stories/${story.slug}/storyboard`;
 
   return (
     <Link
@@ -45,6 +48,11 @@ export function StoryCard({ story, onDelete }: { story: StoryListItem; onDelete?
         )}
         {/* Status badges */}
         <div className="absolute top-2 right-2 flex gap-1.5">
+          {isPaused && (
+            <span className="px-2 py-0.5 bg-amber-500/90 text-white text-[10px] font-semibold rounded-full backdrop-blur-sm animate-pulse">
+              Resume
+            </span>
+          )}
           {story.has_images && (
             <span className="px-2 py-0.5 bg-sage-500/90 text-white text-[10px] font-semibold rounded-full backdrop-blur-sm">
               Illustrated

@@ -35,6 +35,15 @@ interface PipelineState {
 
   setTaskId: (id: string) => void;
   handleEvent: (event: SSEEvent) => void;
+  restoreState: (data: {
+    slug: string;
+    title?: string;
+    waitingForStoryReview?: boolean;
+    waitingForCastReview?: boolean;
+    waitingForCoverSelection?: boolean;
+    castMembers?: CastMember[];
+    coverVariations?: CoverVariation[];
+  }) => void;
   reset: () => void;
 }
 
@@ -163,6 +172,31 @@ export const usePipelineStore = create<PipelineState>((set) => ({
           return {};
       }
     }),
+
+  restoreState: (data) => {
+    // Determine which phase to mark as current so the timeline
+    // shows prior phases as done (green checkmarks)
+    const phase = data.waitingForCoverSelection
+      ? "cover_variations"
+      : data.waitingForCastReview
+        ? "cast"
+        : data.waitingForStoryReview
+          ? "keyframes"
+          : null;
+    set({
+      ...initialState,
+      taskId: null,
+      phase,
+      completed: true,
+      resultSlug: data.slug,
+      resultTitle: data.title ?? null,
+      waitingForStoryReview: data.waitingForStoryReview ?? false,
+      waitingForCastReview: data.waitingForCastReview ?? false,
+      waitingForCoverSelection: data.waitingForCoverSelection ?? false,
+      castMembers: data.castMembers ?? [],
+      coverVariations: data.coverVariations ?? [],
+    });
+  },
 
   reset: () => set(initialState),
 }));

@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { getStory } from "../api/client";
+import { getStory, updateStory } from "../api/client";
 import type { Keyframe } from "../api/types";
 
 interface StoryReviewPanelProps {
@@ -48,49 +48,43 @@ function getMoodColor(mood: string) {
 
 function getBeatLabel(kf: Keyframe): string {
   if (kf.beat_summary) return kf.beat_summary;
-  // Fallback: first ~5 words of page_text
   const words = kf.page_text.split(/\s+/).slice(0, 5).join(" ");
-  return words + (kf.page_text.split(/\s+/).length > 5 ? "..." : "");
+  return words + (kf.page_text.split(/\s+/).length > 5 ? "\u2026" : "");
 }
 
-/* ─── Serpentine layout calculations ─── */
+/* ─── Serpentine ordering ─── */
 
 const COLS = 4;
-const NODE_W = 140;
-const NODE_H = 100;
-const GAP_X = 24;
-const GAP_Y = 40;
 
-function getNodePosition(index: number): { x: number; y: number } {
-  const row = Math.floor(index / COLS);
-  const colInRow = index % COLS;
-  // Alternate row direction: even rows L→R, odd rows R→L
-  const col = row % 2 === 0 ? colInRow : COLS - 1 - colInRow;
-  return {
-    x: col * (NODE_W + GAP_X),
-    y: row * (NODE_H + GAP_Y),
-  };
+/** Returns keyframe indices reordered for serpentine grid display (odd rows reversed). */
+function getSerpentineOrder(count: number): number[] {
+  const order: number[] = [];
+  const rows = Math.ceil(count / COLS);
+  for (let r = 0; r < rows; r++) {
+    const start = r * COLS;
+    const end = Math.min(start + COLS, count);
+    const rowIndices = Array.from({ length: end - start }, (_, i) => start + i);
+    if (r % 2 === 1) rowIndices.reverse();
+    order.push(...rowIndices);
+  }
+  return order;
 }
 
-function buildSerpentinePath(count: number): string {
-  if (count < 2) return "";
-  const points = Array.from({ length: count }, (_, i) => {
-    const pos = getNodePosition(i);
-    return { x: pos.x + NODE_W / 2, y: pos.y + NODE_H / 2 };
-  });
+/* ─── SVG path builder ─── */
 
+function buildPathFromPoints(points: { x: number; y: number }[]): string {
+  if (points.length < 2) return "";
   let d = `M ${points[0].x} ${points[0].y}`;
   for (let i = 1; i < points.length; i++) {
     const prev = points[i - 1];
     const curr = points[i];
-    // Use smooth bezier curves
-    const midY = (prev.y + curr.y) / 2;
-    if (prev.y === curr.y) {
-      // Same row: horizontal curve
+    if (Math.abs(prev.y - curr.y) < 10) {
+      // Same row: gentle arc
       const midX = (prev.x + curr.x) / 2;
-      d += ` Q ${midX} ${prev.y - 20}, ${curr.x} ${curr.y}`;
+      d += ` Q ${midX} ${prev.y - 16}, ${curr.x} ${curr.y}`;
     } else {
-      // Row transition: vertical S-curve
+      // Row transition: S-curve
+      const midY = (prev.y + curr.y) / 2;
       d += ` C ${prev.x} ${midY}, ${curr.x} ${midY}, ${curr.x} ${curr.y}`;
     }
   }
@@ -105,24 +99,90 @@ export function StoryReviewPanel({ slug, onApprove, approving }: StoryReviewPane
     queryFn: () => getStory(slug),
   });
 
-  const pathRef = useRef<SVGPathElement>(null);
-  const [pathLength, setPathLength] = useState(0);
+  const gridRef = useRef<HTMLDivElement>(null);
+  const nodeRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const measuringPathRef = useRef<SVGPathElement>(null);
+  const [svgState, setSvgState] = useState<{
+    d: string; width: number; height: number; length: number;
+  } | null>(null);
   const [hoveredPage, setHoveredPage] = useState<number | null>(null);
 
-  const keyframes = data?.story.keyframes ?? [];
-  const totalRows = Math.ceil(keyframes.length / COLS);
-  const svgWidth = COLS * (NODE_W + GAP_X) - GAP_X;
-  const svgHeight = totalRows * (NODE_H + GAP_Y) - GAP_Y;
-  const containerWidth = svgWidth;
-  const containerHeight = svgHeight;
+  // Title editing
+  const [editedTitle, setEditedTitle] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const titleInputRef = useRef<HTMLInputElement>(null);
+  const originalTitle = data?.story.title ?? "";
+  const currentTitle = editedTitle ?? originalTitle;
+  const titleChanged = editedTitle !== null && editedTitle !== originalTitle;
 
-  const pathD = useMemo(() => buildSerpentinePath(keyframes.length), [keyframes.length]);
-
+  // Sync original title once loaded
   useEffect(() => {
-    if (pathRef.current) {
-      setPathLength(pathRef.current.getTotalLength());
+    if (data?.story.title && editedTitle === null) {
+      setEditedTitle(null); // keep using original
     }
-  }, [pathD]);
+  }, [data?.story.title, editedTitle]);
+
+  // Focus input when entering edit mode
+  useEffect(() => {
+    if (editingTitle && titleInputRef.current) {
+      titleInputRef.current.focus();
+      titleInputRef.current.select();
+    }
+  }, [editingTitle]);
+
+  const handleTitleApprove = useCallback(async () => {
+    // Save title if changed, then delegate to parent
+    if (titleChanged) {
+      await updateStory(slug, { title: editedTitle });
+    }
+    onApprove();
+  }, [titleChanged, slug, editedTitle, onApprove]);
+
+  const keyframes = data?.story.keyframes ?? [];
+  const displayOrder = useMemo(() => getSerpentineOrder(keyframes.length), [keyframes.length]);
+
+  // Measure grid node positions → build SVG path
+  const measureAndBuildPath = useCallback(() => {
+    const grid = gridRef.current;
+    if (!grid || keyframes.length < 2) return;
+
+    const gridRect = grid.getBoundingClientRect();
+    // Collect centers in story order (index 0, 1, 2, ...)
+    const points: { x: number; y: number }[] = [];
+    for (let i = 0; i < keyframes.length; i++) {
+      const el = nodeRefs.current.get(i);
+      if (!el) return; // not all mounted yet
+      const r = el.getBoundingClientRect();
+      points.push({
+        x: r.left + r.width / 2 - gridRect.left,
+        y: r.top + r.height / 2 - gridRect.top,
+      });
+    }
+
+    const d = buildPathFromPoints(points);
+    setSvgState({ d, width: gridRect.width, height: gridRect.height, length: 0 });
+  }, [keyframes.length]);
+
+  // Measure on mount + resize
+  useEffect(() => {
+    measureAndBuildPath();
+    const ro = new ResizeObserver(() => measureAndBuildPath());
+    if (gridRef.current) ro.observe(gridRef.current);
+    return () => ro.disconnect();
+  }, [measureAndBuildPath]);
+
+  // Measure path length once SVG path renders
+  useEffect(() => {
+    if (measuringPathRef.current && svgState && svgState.length === 0) {
+      const len = measuringPathRef.current.getTotalLength();
+      setSvgState((prev) => prev ? { ...prev, length: len } : null);
+    }
+  }, [svgState]);
+
+  const setNodeRef = useCallback((idx: number, el: HTMLDivElement | null) => {
+    if (el) nodeRefs.current.set(idx, el);
+    else nodeRefs.current.delete(idx);
+  }, []);
 
   const handleMouseEnter = useCallback((page: number) => setHoveredPage(page), []);
   const handleMouseLeave = useCallback(() => setHoveredPage(null), []);
@@ -142,77 +202,129 @@ export function StoryReviewPanel({ slug, onApprove, approving }: StoryReviewPane
 
   return (
     <div className="bg-white rounded-[var(--radius-card)] border border-bark-100 p-6 shadow-sm">
-      {/* Flowchart */}
-      <div
-        className="relative mx-auto overflow-x-auto"
-        style={{ maxWidth: containerWidth + 32 }}
-      >
-        <div
-          className="relative mx-auto"
-          style={{ width: containerWidth, height: containerHeight }}
-        >
-          {/* SVG connector path */}
+      {/* Editable title */}
+      <div className="mb-6 pb-5 border-b border-bark-100">
+        <label className="text-[10px] font-bold uppercase tracking-wider text-bark-400 mb-1.5 block">
+          Book Title
+        </label>
+        {editingTitle ? (
+          <div className="flex items-center gap-2">
+            <input
+              ref={titleInputRef}
+              type="text"
+              value={currentTitle}
+              onChange={(e) => setEditedTitle(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") setEditingTitle(false);
+                if (e.key === "Escape") {
+                  setEditedTitle(null);
+                  setEditingTitle(false);
+                }
+              }}
+              onBlur={() => setEditingTitle(false)}
+              className="flex-1 text-xl font-extrabold text-bark-800 font-heading bg-transparent border-b-2 border-amber-400 outline-none py-0.5 px-0"
+            />
+          </div>
+        ) : (
+          <button
+            onClick={() => {
+              if (editedTitle === null) setEditedTitle(originalTitle);
+              setEditingTitle(true);
+            }}
+            className="group flex items-center gap-2 text-left w-full"
+          >
+            <h2 className={`text-xl font-extrabold font-heading ${titleChanged ? "text-amber-600" : "text-bark-800"}`}>
+              {currentTitle}
+            </h2>
+            <svg
+              className="w-4 h-4 text-bark-300 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+              fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125" />
+            </svg>
+            {titleChanged && (
+              <span className="text-[10px] font-semibold text-amber-500 bg-amber-50 px-1.5 py-0.5 rounded-full">
+                edited
+              </span>
+            )}
+          </button>
+        )}
+        <p className="text-[11px] text-bark-400 mt-1.5">
+          Click to edit — this will appear on the cover.
+        </p>
+      </div>
+
+      {/* Grid with SVG overlay */}
+      <div className="relative">
+        {/* SVG connector path (behind nodes) */}
+        {svgState && (
           <svg
             className="absolute inset-0 pointer-events-none"
-            width={containerWidth}
-            height={containerHeight}
-            viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+            width={svgState.width}
+            height={svgState.height}
+            style={{ overflow: "visible" }}
           >
-            {/* Background path (static) */}
+            {/* Static background line */}
             <path
-              d={pathD}
+              d={svgState.d}
               fill="none"
               stroke="var(--color-bark-100)"
               strokeWidth="2"
               strokeLinecap="round"
             />
-            {/* Animated drawn path */}
-            {pathLength > 0 && (
+            {/* Animated draw-in */}
+            {svgState.length > 0 && (
               <path
-                ref={pathRef}
-                d={pathD}
+                d={svgState.d}
                 fill="none"
                 stroke="var(--color-sage-300)"
                 strokeWidth="2"
                 strokeLinecap="round"
-                strokeDasharray={pathLength}
+                strokeDasharray={svgState.length}
                 style={{
-                  animation: `path-draw 1.5s ease-out forwards`,
-                  ["--path-length" as string]: pathLength,
+                  animation: "path-draw 1.5s ease-out forwards",
+                  ["--path-length" as string]: svgState.length,
                 }}
               />
             )}
-            {/* Initial ref measurement path (hidden after measurement) */}
-            {pathLength === 0 && (
+            {/* Measuring path (invisible, for getTotalLength) */}
+            {svgState.length === 0 && (
               <path
-                ref={pathRef}
-                d={pathD}
+                ref={measuringPathRef}
+                d={svgState.d}
                 fill="none"
                 stroke="transparent"
                 strokeWidth="2"
               />
             )}
-            {/* Flowing dots overlay */}
-            {pathLength > 0 && (
+            {/* Flowing dots */}
+            {svgState.length > 0 && (
               <path
-                d={pathD}
+                d={svgState.d}
                 fill="none"
                 stroke="var(--color-sage-400)"
                 strokeWidth="2"
                 strokeLinecap="round"
                 strokeDasharray="4 20"
                 style={{
-                  animation: `path-flow 1.2s linear infinite`,
+                  animation: "path-flow 1.2s linear infinite",
                   animationDelay: "1.5s",
                   opacity: 0.5,
                 }}
               />
             )}
           </svg>
+        )}
 
-          {/* Node cards */}
-          {keyframes.map((kf, i) => {
-            const pos = getNodePosition(i);
+        {/* Node grid */}
+        <div
+          ref={gridRef}
+          className="grid gap-4"
+          style={{ gridTemplateColumns: `repeat(${COLS}, 1fr)` }}
+        >
+          {displayOrder.map((storyIdx, displayIdx) => {
+            const kf = keyframes[storyIdx];
+            if (!kf) return null;
             const moodColor = getMoodColor(kf.mood);
             const isHovered = hoveredPage === kf.page_number;
             const isCover = kf.is_cover;
@@ -220,20 +332,15 @@ export function StoryReviewPanel({ slug, onApprove, approving }: StoryReviewPane
             return (
               <div
                 key={kf.page_number}
-                className="story-node-enter absolute"
-                style={{
-                  left: pos.x,
-                  top: pos.y,
-                  width: NODE_W,
-                  height: NODE_H,
-                  animationDelay: `${i * 80}ms`,
-                }}
+                ref={(el) => setNodeRef(storyIdx, el)}
+                className="story-node-enter relative z-10"
+                style={{ animationDelay: `${displayIdx * 60}ms` }}
                 onMouseEnter={() => handleMouseEnter(kf.page_number)}
                 onMouseLeave={handleMouseLeave}
               >
                 <div
                   className={`
-                    relative h-full rounded-xl border px-3 py-2.5
+                    relative rounded-xl border px-3 py-2.5
                     transition-all duration-200 cursor-default
                     ${isCover
                       ? "border-amber-300 bg-amber-50/80"
@@ -242,15 +349,12 @@ export function StoryReviewPanel({ slug, onApprove, approving }: StoryReviewPane
                     ${isHovered ? "shadow-lg -translate-y-1 border-bark-200" : "shadow-sm"}
                   `}
                 >
-                  {/* Page badge */}
-                  <div className="flex items-center gap-2 mb-1.5">
+                  {/* Page badge + mood */}
+                  <div className="flex items-center gap-1.5 mb-1.5">
                     <div
                       className={`
                         w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0
-                        ${isCover
-                          ? "bg-amber-400 text-white"
-                          : "bg-bark-100 text-bark-500"
-                        }
+                        ${isCover ? "bg-amber-400 text-white" : "bg-bark-100 text-bark-500"}
                       `}
                     >
                       {isCover ? (
@@ -262,15 +366,14 @@ export function StoryReviewPanel({ slug, onApprove, approving }: StoryReviewPane
                       )}
                     </div>
 
-                    {/* Mood pill */}
                     <span
                       className={`
-                        inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold leading-none
+                        inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold leading-none truncate
                         ${moodColor.bg} ${moodColor.text}
                       `}
                     >
-                      <span className={`w-1.5 h-1.5 rounded-full ${moodColor.dot}`} />
-                      {kf.mood}
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${moodColor.dot}`} />
+                      <span className="truncate">{kf.mood}</span>
                     </span>
                   </div>
 
@@ -285,16 +388,13 @@ export function StoryReviewPanel({ slug, onApprove, approving }: StoryReviewPane
                   </div>
                 </div>
 
-                {/* Hover tooltip: first sentence of page_text */}
+                {/* Hover tooltip */}
                 {isHovered && (
-                  <div
-                    className="absolute left-1/2 -translate-x-1/2 z-20 w-56 p-3 rounded-lg bg-bark-800 text-white text-[11px] leading-relaxed shadow-xl tl-fade-in"
-                    style={{ top: NODE_H + 8 }}
-                  >
+                  <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 z-50 w-56 p-3 rounded-lg bg-bark-800 text-white text-[11px] leading-relaxed shadow-xl tl-fade-in pointer-events-none">
                     <p className="line-clamp-3">
                       {kf.page_text.split(/[.!?]/)[0].trim()}.
                     </p>
-                    <div className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-3 h-3 rotate-45 bg-bark-800" />
+                    <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 rotate-45 bg-bark-800" />
                   </div>
                 )}
               </div>
@@ -309,7 +409,7 @@ export function StoryReviewPanel({ slug, onApprove, approving }: StoryReviewPane
           Review your story flow. You can regenerate later if needed.
         </p>
         <button
-          onClick={onApprove}
+          onClick={handleTitleApprove}
           disabled={approving}
           className={`
             inline-flex items-center gap-2 px-6 py-2.5 rounded-[var(--radius-btn)]

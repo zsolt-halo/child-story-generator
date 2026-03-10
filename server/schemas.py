@@ -18,6 +18,7 @@ class StoryListItem(BaseModel):
     created_at: str | None = None
     title_translated: str | None = None
     parent_slug: str | None = None
+    pipeline_status: str = "complete"  # story_review, cast_review, complete, draft
 
 
 class PipelineStartRequest(BaseModel):

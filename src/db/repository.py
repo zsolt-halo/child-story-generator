@@ -544,14 +544,28 @@ class StoryRepository:
     @staticmethod
     def _row_to_list_item(row: StoryRow) -> dict:
         """Convert a StoryRow to a summary dict for list endpoints."""
+        has_keyframes = len(row.keyframes) > 0
+        cast_count = len(row.cast_members)
+        has_images = row.has_images
+
+        if has_images:
+            pipeline_status = "complete"
+        elif cast_count > 0:
+            pipeline_status = "cast_review"
+        elif has_keyframes:
+            pipeline_status = "story_review"
+        else:
+            pipeline_status = "draft"
+
         return {
             "slug": row.slug,
             "title": row.title,
             "page_count": len(row.keyframes),
-            "has_images": row.has_images,
+            "has_images": has_images,
             "has_pdf": row.has_pdf,
             "created_at": row.created_at.isoformat() if row.created_at else None,
             "title_translated": row.title_translated,
             "parent_slug": row.parent_slug,
             "cover_url": _cover_url_from_row(row),
+            "pipeline_status": pipeline_status,
         }

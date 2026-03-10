@@ -50,6 +50,17 @@ async def get_story_detail(slug: str):
         for p in discover_backdrops(story_dir)
     ]
 
+    # Check for reference sheet
+    ref_sheet_path = images_dir / "reference_sheet.png"
+    reference_sheet_url = f"/api/stories/{slug}/images/reference_sheet.png" if ref_sheet_path.exists() else None
+
+    # Check for cover variation files (cover_v1.png, cover_v2.png, ...)
+    cover_variation_urls = []
+    for i in range(1, 5):
+        vp = images_dir / f"cover_v{i}.png"
+        if vp.exists():
+            cover_variation_urls.append(f"/api/stories/{slug}/images/cover_v{i}.png")
+
     metadata = await get_metadata(slug)
 
     return {
@@ -57,6 +68,8 @@ async def get_story_detail(slug: str):
         "story": story.model_dump(),
         "image_urls": image_urls,
         "backdrop_urls": backdrop_urls,
+        "cover_variation_urls": cover_variation_urls,
+        "reference_sheet_url": reference_sheet_url,
         "has_pdf": (story_dir / "book.pdf").exists(),
         "has_screen_pdf": (story_dir / "book-screen.pdf").exists(),
         "has_spread_pdf": (story_dir / "book-spreads.pdf").exists(),

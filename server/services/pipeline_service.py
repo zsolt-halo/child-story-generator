@@ -282,7 +282,7 @@ async def run_full_pipeline(
     images_dir.mkdir(parents=True, exist_ok=True)
     async with _phase(task_id, "reference_sheet", "Generating character reference sheet...") as r:
         ref_path = await asyncio.to_thread(generate_reference_sheet, char, style_anchor, config, images_dir)
-        r.update(generated=ref_path is not None)
+        r.update(generated=ref_path is not None, url=f"/api/stories/{slug}/images/reference_sheet.png" if ref_path else None)
 
     ref_bytes = load_reference_sheet(images_dir)
 
@@ -487,7 +487,7 @@ async def run_continue_pipeline(task_id: str, slug: str, cast_edited: bool = Fal
     images_dir.mkdir(parents=True, exist_ok=True)
     async with _phase(task_id, "reference_sheet", "Generating character reference sheet...") as r:
         ref_path = await asyncio.to_thread(generate_reference_sheet, ctx.char, ctx.style_anchor, ctx.config, images_dir)
-        r.update(generated=ref_path is not None)
+        r.update(generated=ref_path is not None, url=f"/api/stories/{slug}/images/reference_sheet.png" if ref_path else None)
 
     # Phase 2d: Cover Variations
     cover_kf = next((kf for kf in ctx.story.keyframes if kf.is_cover), None)

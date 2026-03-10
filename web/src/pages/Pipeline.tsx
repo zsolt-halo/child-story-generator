@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { usePipelineStore } from "../stores/pipelineStore";
 import { useSSE } from "../hooks/useSSE";
 import { PipelineTimeline } from "../components/PipelineTimeline";
 import { CastReviewPanel } from "../components/CastReviewPanel";
 import { CoverSelectionPanel } from "../components/CoverSelectionPanel";
-import { updateStory, continuePipeline, selectCoverAndContinue, startCastExtraction, getPhaseAverages } from "../api/client";
+import { updateStory, continuePipeline, selectCoverAndContinue, startCastExtraction, getPhaseAverages, getStory } from "../api/client";
 import { StoryReviewPanel } from "../components/StoryReviewPanel";
 import { FadeImage } from "../components/FadeImage";
 import type { CastMember } from "../api/types";
@@ -14,6 +14,7 @@ import type { CastMember } from "../api/types";
 export function Pipeline() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { slug: routeSlug } = useParams<{ slug: string }>();
   const {
     taskId, phase, phaseMessage, completed, failed, error,
     images, imageProgress, imageTotal, resultSlug,
@@ -21,7 +22,7 @@ export function Pipeline() {
     coverVariations, waitingForCoverSelection,
     queuePosition, queueAhead,
     phaseData, phaseElapsed, phaseStartTime,
-    setTaskId, handleEvent,
+    setTaskId, handleEvent, restoreState,
   } = usePipelineStore();
   const [approvingStory, setApprovingStory] = useState(false);
   const [approving, setApproving] = useState(false);
@@ -33,17 +34,67 @@ export function Pipeline() {
   });
 
   // Pick up taskId from navigation state (from NewStory page) — consume only once
+  // If navigating with a route slug but no fresh taskId, reset store for recovery
   const consumedStateRef = useRef(false);
   useEffect(() => {
     if (consumedStateRef.current) return;
+    consumedStateRef.current = true;
     const stateTaskId = (location.state as { taskId?: string } | null)?.taskId;
     if (stateTaskId) {
-      consumedStateRef.current = true;
       setTaskId(stateTaskId);
+    } else if (routeSlug && taskId) {
+      // Stale taskId in store (e.g. container restart) — reset to allow recovery
+      usePipelineStore.getState().reset();
     }
-  }, [location.state, setTaskId]);
+  }, [location.state, setTaskId, routeSlug, taskId]);
 
   useSSE(taskId, "/api/pipeline/progress", handleEvent);
+
+  // Recover state from DB when we have a route slug but no active task
+  const recoveredRef = useRef(false);
+  useEffect(() => {
+    if (recoveredRef.current || taskId || !routeSlug) return;
+    // Don't recover if we already have a waiting state (store is populated)
+    if (waitingForStoryReview || waitingForCastReview || waitingForCoverSelection) return;
+    recoveredRef.current = true;
+
+    getStory(routeSlug).then((detail) => {
+      const { story, image_urls, cover_variation_urls } = detail;
+      const hasKeyframes = story.keyframes.length > 0;
+      const hasCast = story.cast.length > 0;
+      const hasImages = Object.keys(image_urls).length > 0;
+      const hasCoverVariations = cover_variation_urls.length > 0;
+
+      // Determine which pause point the story is at
+      if (hasCoverVariations && !hasImages) {
+        restoreState({
+          slug: routeSlug,
+          title: story.title,
+          waitingForCoverSelection: true,
+          coverVariations: cover_variation_urls.map((url, i) => ({ index: i + 1, url })),
+        });
+      } else if (hasCast && !hasImages) {
+        restoreState({
+          slug: routeSlug,
+          title: story.title,
+          waitingForCastReview: true,
+          castMembers: story.cast,
+        });
+      } else if (hasKeyframes && !hasCast) {
+        restoreState({
+          slug: routeSlug,
+          title: story.title,
+          waitingForStoryReview: true,
+        });
+      }
+      // If has images, it's complete — navigate to review
+      else if (hasImages) {
+        navigate(`/stories/${routeSlug}/review`, { replace: true });
+      }
+    }).catch((err) => {
+      console.error("Failed to recover pipeline state:", err);
+    });
+  }, [routeSlug, taskId, waitingForStoryReview, waitingForCastReview, waitingForCoverSelection, restoreState, navigate]);
 
   const handleStoryApprove = useCallback(async () => {
     if (!resultSlug) return;
@@ -103,7 +154,9 @@ export function Pipeline() {
 
   const isQueued = queuePosition > 0;
 
-  if (!taskId) {
+  // Show empty state only if we have no task, no recovered state, and no route slug to recover from
+  const hasRestoredState = waitingForStoryReview || waitingForCastReview || waitingForCoverSelection;
+  if (!taskId && !hasRestoredState && !routeSlug) {
     return (
       <div className="text-center py-20">
         <p className="text-bark-400">No active pipeline. Start by creating a new story.</p>
@@ -111,8 +164,13 @@ export function Pipeline() {
     );
   }
 
+  // Show loading while recovering state from DB
+  const isRecovering = !taskId && !hasRestoredState && !!routeSlug;
+
+  const isWideLayout = waitingForStoryReview;
+
   return (
-    <div className="max-w-3xl mx-auto">
+    <div className={`mx-auto ${isWideLayout ? "max-w-5xl" : "max-w-3xl"}`}>
       <h1 className="text-2xl font-extrabold text-bark-800 mb-2">
         {isQueued
           ? "Your Story Is in Line"
@@ -124,7 +182,9 @@ export function Pipeline() {
                 ? "Review Cast"
                 : completed
                   ? "Story Complete!"
-                  : "Creating Your Story"}
+                  : isRecovering
+                    ? "Resuming..."
+                    : "Creating Your Story"}
       </h1>
       <p className="text-sm text-bark-400 mb-8">
         {isQueued
@@ -137,7 +197,9 @@ export function Pipeline() {
                 ? "Check character descriptions before illustrations begin"
                 : completed
                   ? "Redirecting to review..."
-                  : phaseMessage || "Preparing pipeline..."}
+                  : isRecovering
+                    ? "Loading your story..."
+                    : phaseMessage || "Preparing pipeline..."}
       </p>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -206,15 +268,6 @@ export function Pipeline() {
             </div>
           )}
 
-          {/* Story review panel */}
-          {waitingForStoryReview && resultSlug && (
-            <StoryReviewPanel
-              slug={resultSlug}
-              onApprove={handleStoryApprove}
-              approving={approvingStory}
-            />
-          )}
-
           {/* Cast review panel */}
           {waitingForCastReview && (
             <CastReviewPanel
@@ -231,6 +284,24 @@ export function Pipeline() {
               onSelect={handleCoverSelect}
               selecting={selectingCover}
             />
+          )}
+
+          {/* Reference sheet preview */}
+          {typeof phaseData.reference_sheet?.url === "string" && !waitingForCastReview && !waitingForCoverSelection && (
+            <div className="bg-white rounded-[var(--radius-card)] border border-bark-100 p-5 shadow-sm tl-fade-in">
+              <h2 className="text-sm font-bold text-bark-600 mb-3">Character Reference Sheet</h2>
+              <div className="rounded-lg overflow-hidden border border-bark-100">
+                <FadeImage
+                  src={phaseData.reference_sheet.url as string}
+                  thumbWidth={600}
+                  alt="Character reference sheet"
+                  className="w-full"
+                />
+              </div>
+              <p className="text-[11px] text-bark-400 mt-2">
+                This model sheet guides all illustrations for character consistency.
+              </p>
+            </div>
           )}
 
           {/* Image progress */}
@@ -289,6 +360,17 @@ export function Pipeline() {
           )}
         </div>
       </div>
+
+      {/* Story review panel — full width below the grid */}
+      {waitingForStoryReview && resultSlug && (
+        <div className="mt-6">
+          <StoryReviewPanel
+            slug={resultSlug}
+            onApprove={handleStoryApprove}
+            approving={approvingStory}
+          />
+        </div>
+      )}
     </div>
   );
 }

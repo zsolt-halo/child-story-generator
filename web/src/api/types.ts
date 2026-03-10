@@ -8,6 +8,7 @@ export interface StoryListItem {
   created_at: string | null;
   title_translated: string | null;
   parent_slug: string | null;
+  pipeline_status: "story_review" | "cast_review" | "complete" | "draft";
 }
 
 export interface Keyframe {
@@ -56,6 +57,8 @@ export interface StoryDetail {
   story: Story;
   image_urls: Record<number, string>;
   backdrop_urls: string[];
+  cover_variation_urls: string[];
+  reference_sheet_url: string | null;
   has_pdf: boolean;
   has_screen_pdf: boolean;
   has_spread_pdf: boolean;

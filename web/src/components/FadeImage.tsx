@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 /** Append ?w= to an image URL for server-side thumbnail resizing. */
 export function thumb(url: string, width: number): string {
@@ -19,6 +19,9 @@ export function FadeImage({ src, thumbWidth, className = "", style, ...rest }: F
   const [loaded, setLoaded] = useState(false);
 
   const finalSrc = src && thumbWidth ? thumb(src, thumbWidth) : src;
+
+  // Reset fade when the image source changes
+  useEffect(() => { setLoaded(false); }, [finalSrc]);
 
   return (
     <img
