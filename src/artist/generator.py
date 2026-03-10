@@ -11,8 +11,8 @@ from rich.progress import Progress
 
 from src.models import BookConfig, CastMember, Character, Keyframe
 
-RETRY_DELAY = 5.0
-MAX_RETRIES = 2
+RETRY_DELAY = 10.0
+MAX_RETRIES = 5
 
 
 def build_image_prompt(
@@ -105,7 +105,8 @@ def generate_single_image(
 
         except Exception as e:
             if attempt < MAX_RETRIES - 1:
-                time.sleep(RETRY_DELAY * (attempt + 1))
+                delay = RETRY_DELAY * (2 ** attempt)  # exponential backoff: 10, 20, 40, 80s
+                time.sleep(delay)
             else:
                 raise RuntimeError(f"Image generation failed after {MAX_RETRIES} attempts: {e}") from e
 

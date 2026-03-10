@@ -1,0 +1,42 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: starlight
+      POSTGRES_USER: starlight
+      POSTGRES_PASSWORD: starlight
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U starlight -d starlight"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://starlight:starlight@postgres:5432/starlight
+      CORS_ORIGINS: "http://localhost:5173,http://localhost:3000"
+    volumes:
+      - stories-data:/app/stories
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build: ./web
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  postgres-data:
+  stories-data:
