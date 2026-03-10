@@ -117,3 +117,23 @@ h1, h2, h3, h4, h5, h6 {
 .queue-dot-1 { animation: queue-dot-bounce 1.4s ease-in-out infinite; }
 .queue-dot-2 { animation: queue-dot-bounce 1.4s ease-in-out 0.2s infinite; }
 .queue-dot-3 { animation: queue-dot-bounce 1.4s ease-in-out 0.4s infinite; }
+
+/* Story Review Panel Animations */
+@keyframes story-node-enter {
+  from { opacity: 0; transform: translateY(16px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.story-node-enter {
+  animation: story-node-enter 0.45s ease-out forwards;
+  opacity: 0;
+}
+
+@keyframes path-draw {
+  from { stroke-dashoffset: var(--path-length); }
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes path-flow {
+  from { stroke-dashoffset: 24; }
+  to { stroke-dashoffset: 0; }
+}

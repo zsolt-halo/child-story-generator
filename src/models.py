@@ -32,6 +32,7 @@ class Keyframe(BaseModel):
     page_text: str
     visual_description: str
     mood: str
+    beat_summary: str = ""
     is_cover: bool = False
     page_text_translated: str | None = None
 

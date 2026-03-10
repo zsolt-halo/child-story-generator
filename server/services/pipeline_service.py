@@ -16,6 +16,9 @@ from server.services.task_manager import task_manager
 
 logger = logging.getLogger(__name__)
 
+# Background task refs to prevent GC of fire-and-forget coroutines
+_background_tasks: set[asyncio.Task] = set()
+
 
 # ---------------------------------------------------------------------------
 # Phase timing persistence
@@ -25,12 +28,24 @@ ROLLING_WINDOW = 20  # Number of recent runs to average for ETA
 
 
 async def _record_phase_timing(phase: str, duration: float):
-    """Persist a phase timing record to the database (fire-and-forget)."""
+    """Persist a phase timing record and prune old rows beyond ROLLING_WINDOW."""
     try:
         from src.db.engine import get_async_session_factory
         from src.db.models import PhaseTimingRow
+        from sqlalchemy import delete, select
         async with get_async_session_factory()() as session:
             session.add(PhaseTimingRow(phase=phase, duration_seconds=duration))
+            await session.flush()
+            # Prune: keep only the newest ROLLING_WINDOW rows per phase
+            sub = (
+                select(PhaseTimingRow.id)
+                .where(PhaseTimingRow.phase == phase)
+                .order_by(PhaseTimingRow.created_at.desc())
+                .offset(ROLLING_WINDOW)
+            ).subquery()
+            await session.execute(
+                delete(PhaseTimingRow).where(PhaseTimingRow.id.in_(select(sub.c.id)))
+            )
             await session.commit()
     except Exception:
         logger.debug("Failed to record phase timing for %s", phase, exc_info=True)
@@ -41,7 +56,6 @@ async def get_phase_averages() -> dict[str, float]:
     from src.db.engine import get_async_session_factory
     from src.db.models import PhaseTimingRow
     from sqlalchemy import func, select
-    from sqlalchemy.orm import aliased
 
     async with get_async_session_factory()() as session:
         # Subquery: rank each timing row per phase by recency
@@ -140,7 +154,9 @@ async def _phase(task_id: str, phase: str, message: str, **extra_data):
         complete_event["data"] = result
     await task_manager.broadcast(task_id, complete_event)
     # Record timing for future ETA estimation (fire-and-forget)
-    asyncio.create_task(_record_phase_timing(phase, elapsed))
+    task = asyncio.create_task(_record_phase_timing(phase, elapsed))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
 
 async def _illustrate_keyframes(
@@ -339,15 +355,7 @@ async def run_story_only(
     }
     await _save(slug, story, metadata=metadata)
 
-    # Phase 2.5: Cast Extraction
-    from src.brain.cast_extractor import extract_cast
-    story.cast = []
-    async with _phase(task_id, "cast", "Analyzing character cast for consistency...") as r:
-        story = await asyncio.to_thread(extract_cast, story, char, config)
-        await _save(slug, story)
-        r.update(cast_count=len(story.cast), members=[m.model_dump() for m in story.cast])
-
-    return {"slug": slug, "title": story.title}
+    return {"slug": slug, "title": story.title, "has_keyframes": True}
 
 
 async def run_cast_extraction(task_id: str, slug: str) -> dict:

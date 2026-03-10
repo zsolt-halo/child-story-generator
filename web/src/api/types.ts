@@ -15,6 +15,7 @@ export interface Keyframe {
   page_text: string;
   visual_description: string;
   mood: string;
+  beat_summary: string;
   is_cover: boolean;
   page_text_translated: string | null;
 }

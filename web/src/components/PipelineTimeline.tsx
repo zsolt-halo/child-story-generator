@@ -102,6 +102,7 @@ interface PipelineTimelineProps {
   currentPhase: string | null;
   completed: boolean;
   failed: boolean;
+  waitingForStoryReview?: boolean;
   waitingForCastReview?: boolean;
   waitingForCoverSelection?: boolean;
   phaseMessage?: string | null;
@@ -117,6 +118,7 @@ export function PipelineTimeline({
   currentPhase,
   completed,
   failed,
+  waitingForStoryReview,
   waitingForCastReview,
   waitingForCoverSelection,
   phaseMessage,
@@ -128,7 +130,7 @@ export function PipelineTimeline({
   phaseAverages = {},
 }: PipelineTimelineProps) {
   const currentIdx = PHASES.findIndex((p) => p.key === currentPhase);
-  const isWaitingAny = waitingForCastReview || waitingForCoverSelection;
+  const isWaitingAny = waitingForStoryReview || waitingForCastReview || waitingForCoverSelection;
   const hasAverages = Object.keys(phaseAverages).length > 0;
 
   // Live elapsed timer for the active phase
@@ -219,6 +221,7 @@ export function PipelineTimeline({
           const isDone = currentIdx > i || (completed && !isWaitingAny);
           const isActive = currentIdx === i && !completed && !failed;
           const isWaiting =
+            (waitingForStoryReview && phase.key === "keyframes" && completed) ||
             (waitingForCastReview && phase.key === "cast" && completed) ||
             (waitingForCoverSelection && phase.key === "cover_variations" && completed);
           const isFailed = failed && currentIdx === i;
@@ -378,7 +381,7 @@ export function PipelineTimeline({
                 {isWaiting && (
                   <span className="inline-flex items-center gap-1.5 mt-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-semibold tl-fade-in">
                     <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-                    {phase.key === "cast" ? "Review needed" : "Selection needed"}
+                    {phase.key === "keyframes" ? "Review needed" : phase.key === "cast" ? "Review needed" : "Selection needed"}
                   </span>
                 )}
 

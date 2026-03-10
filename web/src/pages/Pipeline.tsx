@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { usePipelineStore } from "../stores/pipelineStore";
 import { useSSE } from "../hooks/useSSE";
 import { PipelineTimeline } from "../components/PipelineTimeline";
 import { CastReviewPanel } from "../components/CastReviewPanel";
 import { CoverSelectionPanel } from "../components/CoverSelectionPanel";
-import { updateStory, continuePipeline, selectCoverAndContinue, getPhaseAverages } from "../api/client";
+import { updateStory, continuePipeline, selectCoverAndContinue, startCastExtraction, getPhaseAverages } from "../api/client";
+import { StoryReviewPanel } from "../components/StoryReviewPanel";
 import { FadeImage } from "../components/FadeImage";
 import type { CastMember } from "../api/types";
 
@@ -15,20 +17,20 @@ export function Pipeline() {
   const {
     taskId, phase, phaseMessage, completed, failed, error,
     images, imageProgress, imageTotal, resultSlug,
-    castMembers, waitingForCastReview,
+    castMembers, waitingForStoryReview, waitingForCastReview,
     coverVariations, waitingForCoverSelection,
     queuePosition, queueAhead,
     phaseData, phaseElapsed, phaseStartTime,
     setTaskId, handleEvent,
   } = usePipelineStore();
+  const [approvingStory, setApprovingStory] = useState(false);
   const [approving, setApproving] = useState(false);
   const [selectingCover, setSelectingCover] = useState(false);
-  const [phaseAverages, setPhaseAverages] = useState<Record<string, number>>({});
-
-  // Fetch phase averages on mount (for ETA display)
-  useEffect(() => {
-    getPhaseAverages().then(setPhaseAverages).catch(() => {});
-  }, []);
+  const { data: phaseAverages = {} } = useQuery({
+    queryKey: ["phaseAverages"],
+    queryFn: getPhaseAverages,
+    staleTime: 60_000,
+  });
 
   // Pick up taskId from navigation state (from NewStory page) — consume only once
   const consumedStateRef = useRef(false);
@@ -43,15 +45,28 @@ export function Pipeline() {
 
   useSSE(taskId, "/api/pipeline/progress", handleEvent);
 
-  // Navigate to review on completion (but not if waiting for cast review or cover selection)
+  const handleStoryApprove = useCallback(async () => {
+    if (!resultSlug) return;
+    setApprovingStory(true);
+    try {
+      const res = await startCastExtraction(resultSlug);
+      setTaskId(res.task_id);
+    } catch (err) {
+      console.error("Failed to start cast extraction:", err);
+    } finally {
+      setApprovingStory(false);
+    }
+  }, [resultSlug, setTaskId]);
+
+  // Navigate to review on completion (but not if waiting for any review step)
   useEffect(() => {
-    if (completed && resultSlug && !waitingForCastReview && !waitingForCoverSelection) {
+    if (completed && resultSlug && !waitingForStoryReview && !waitingForCastReview && !waitingForCoverSelection) {
       const timer = setTimeout(() => {
         navigate(`/stories/${resultSlug}/review`);
       }, 2000);
       return () => clearTimeout(timer);
     }
-  }, [completed, resultSlug, waitingForCastReview, waitingForCoverSelection, navigate]);
+  }, [completed, resultSlug, waitingForStoryReview, waitingForCastReview, waitingForCoverSelection, navigate]);
 
   const handleCastApprove = useCallback(async (cast: CastMember[]) => {
     if (!resultSlug) return;
@@ -101,24 +116,28 @@ export function Pipeline() {
       <h1 className="text-2xl font-extrabold text-bark-800 mb-2">
         {isQueued
           ? "Your Story Is in Line"
-          : waitingForCoverSelection
-            ? "Choose Your Cover"
-            : waitingForCastReview
-              ? "Review Cast"
-              : completed
-                ? "Story Complete!"
-                : "Creating Your Story"}
+          : waitingForStoryReview
+            ? "Review Your Story"
+            : waitingForCoverSelection
+              ? "Choose Your Cover"
+              : waitingForCastReview
+                ? "Review Cast"
+                : completed
+                  ? "Story Complete!"
+                  : "Creating Your Story"}
       </h1>
       <p className="text-sm text-bark-400 mb-8">
         {isQueued
           ? "Hang tight \u2014 we'll start as soon as it's your turn"
-          : waitingForCoverSelection
-            ? "Pick the cover art that best captures your story"
-            : waitingForCastReview
-              ? "Check character descriptions before illustrations begin"
-              : completed
-                ? "Redirecting to review..."
-                : phaseMessage || "Preparing pipeline..."}
+          : waitingForStoryReview
+            ? "Check your story flow before we find the characters"
+            : waitingForCoverSelection
+              ? "Pick the cover art that best captures your story"
+              : waitingForCastReview
+                ? "Check character descriptions before illustrations begin"
+                : completed
+                  ? "Redirecting to review..."
+                  : phaseMessage || "Preparing pipeline..."}
       </p>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -129,6 +148,7 @@ export function Pipeline() {
             currentPhase={phase}
             completed={completed}
             failed={failed}
+            waitingForStoryReview={waitingForStoryReview}
             waitingForCastReview={waitingForCastReview}
             waitingForCoverSelection={waitingForCoverSelection}
             phaseMessage={phaseMessage}
@@ -186,6 +206,15 @@ export function Pipeline() {
             </div>
           )}
 
+          {/* Story review panel */}
+          {waitingForStoryReview && resultSlug && (
+            <StoryReviewPanel
+              slug={resultSlug}
+              onApprove={handleStoryApprove}
+              approving={approvingStory}
+            />
+          )}
+
           {/* Cast review panel */}
           {waitingForCastReview && (
             <CastReviewPanel
@@ -205,7 +234,7 @@ export function Pipeline() {
           )}
 
           {/* Image progress */}
-          {(phase === "illustration" || images.length > 0) && !waitingForCastReview && !waitingForCoverSelection && (
+          {(phase === "illustration" || images.length > 0) && !waitingForStoryReview && !waitingForCastReview && !waitingForCoverSelection && (
             <div className="bg-white rounded-[var(--radius-card)] border border-bark-100 p-5 shadow-sm">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-sm font-bold text-bark-600">Illustrations</h2>

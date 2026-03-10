@@ -85,6 +85,7 @@ class KeyframeRow(Base):
     page_text: Mapped[str] = mapped_column(Text, nullable=False)
     visual_description: Mapped[str] = mapped_column(Text, nullable=False)
     mood: Mapped[str] = mapped_column(String(100), nullable=False)
+    beat_summary: Mapped[str] = mapped_column(String(200), default="")
     is_cover: Mapped[bool] = mapped_column(Boolean, default=False)
     page_text_translated: Mapped[str | None] = mapped_column(Text, nullable=True)
     has_image: Mapped[bool] = mapped_column(Boolean, default=False)

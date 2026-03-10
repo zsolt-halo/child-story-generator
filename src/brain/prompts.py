@@ -151,6 +151,7 @@ Given a complete story, split it into pages. For each page:
 2. **visual_description**: A detailed illustration prompt describing exactly what should be depicted. Always include the character's visual constants. Describe the scene, lighting, composition, and mood. Do NOT include any text or words in the illustration.
 3. **mood**: One or two words capturing the emotional tone (e.g., "joyful", "mysterious", "cozy").
 4. **is_cover**: Set to true for exactly one keyframe — the most visually striking moment that represents the whole story. This becomes the front cover.
+5. **beat_summary**: A 3-5 word story beat label for this page (e.g., "discovering the secret garden", "making a new friend"). This is used for the visual story flow summary.
 
 The first keyframe (page 1) should be the story opening. The cover keyframe can be any page.
 Every visual_description must mention: "{character.visual.description}, {character.visual.constants}" to maintain character consistency.

@@ -21,6 +21,7 @@ interface PipelineState {
   resultSlug: string | null;
   resultTitle: string | null;
   castMembers: CastMember[];
+  waitingForStoryReview: boolean;
   waitingForCastReview: boolean;
   coverVariations: CoverVariation[];
   waitingForCoverSelection: boolean;
@@ -50,6 +51,7 @@ const initialState = {
   resultSlug: null,
   resultTitle: null,
   castMembers: [] as CastMember[],
+  waitingForStoryReview: false,
   waitingForCastReview: false,
   coverVariations: [] as CoverVariation[],
   waitingForCoverSelection: false,
@@ -132,13 +134,16 @@ export const usePipelineStore = create<PipelineState>((set) => ({
         case "task_complete": {
           const result = event.result ?? {};
           const slug = (result.slug as string) ?? state.resultSlug;
+          const hasKeyframes = !!(result.has_keyframes);
           const hasCast = state.castMembers.length > 0 || (result.cast_count as number) > 0;
 
           // Use cover variations from result as fallback if SSE events were missed
           const resultCovers = result.cover_variations as CoverVariation[] | undefined;
           const covers = resultCovers?.length ? resultCovers : state.coverVariations;
 
-          // If this was a story-only task (cast present, no images), pause for cast review
+          // If story+keyframes done but no cast yet, pause for story review
+          const shouldWaitStory = hasKeyframes && !hasCast && state.images.length === 0 && covers.length === 0;
+          // If cast present but no images, pause for cast review
           const shouldWaitCast = hasCast && state.images.length === 0 && covers.length === 0;
           // If cover variations were generated, pause for cover selection
           const shouldWaitCover = covers.length > 0;
@@ -146,6 +151,7 @@ export const usePipelineStore = create<PipelineState>((set) => ({
             completed: true,
             resultSlug: slug,
             resultTitle: (result.title as string) ?? state.resultTitle,
+            waitingForStoryReview: shouldWaitStory,
             waitingForCastReview: shouldWaitCast,
             waitingForCoverSelection: shouldWaitCover,
             coverVariations: covers,
