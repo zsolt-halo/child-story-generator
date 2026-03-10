@@ -202,7 +202,7 @@ def generate_cover_variations(
         paths.append(final_path)
 
         if i < count:
-            time.sleep(2.0)
+            time.sleep(5.0)
 
     return paths
 
@@ -264,7 +264,7 @@ def generate_all_illustrations(
 
         # Rate limit delay between images
         if kf != keyframes[-1]:
-            time.sleep(2.0)
+            time.sleep(5.0)
 
     return paths
 
@@ -328,6 +328,6 @@ def generate_backdrops(
         paths.append(final_path)
 
         if i < count - 1:
-            time.sleep(2.0)
+            time.sleep(5.0)
 
     return paths

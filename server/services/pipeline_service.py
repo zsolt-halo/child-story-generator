@@ -175,7 +175,7 @@ async def run_full_pipeline(
         })
 
         if i < len(story.keyframes) - 1:
-            await asyncio.sleep(2.0)
+            await asyncio.sleep(5.0)
 
     await _save(slug, story, [str(p) for p in image_paths])
     await task_manager.broadcast(task_id, {
@@ -384,7 +384,7 @@ async def run_illustrate(task_id: str, slug: str, page_number: int | None = None
         })
 
         if i < len(keyframes) - 1:
-            await asyncio.sleep(2.0)
+            await asyncio.sleep(5.0)
 
     # Update image_paths in DB
     if page_number is None:
@@ -579,7 +579,7 @@ async def run_after_cover_selection(task_id: str, slug: str, choice: int) -> dic
         })
 
         if i < len(story.keyframes) - 1:
-            await asyncio.sleep(2.0)
+            await asyncio.sleep(5.0)
 
     await _save(slug, story, [str(p) for p in new_image_paths])
     await task_manager.broadcast(task_id, {
