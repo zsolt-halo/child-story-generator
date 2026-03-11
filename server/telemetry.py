@@ -78,6 +78,7 @@ def setup_telemetry(app: FastAPI) -> None:
     # --- Metrics ---
     readers = []
     if exporter_mode == "otlp":
+        # Prometheus pull endpoint (for k8s ServiceMonitor)
         try:
             from prometheus_client import start_http_server
             from opentelemetry.exporter.prometheus import PrometheusMetricReader
@@ -87,6 +88,24 @@ def setup_telemetry(app: FastAPI) -> None:
             logger.info("Prometheus metrics available on :9464/metrics")
         except Exception:
             logger.warning("Failed to start Prometheus metric reader", exc_info=True)
+        # OTLP push (for otel-lgtm / collector-based setups)
+        try:
+            from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
+            from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+            metrics_endpoint = os.environ.get(
+                "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+                os.environ.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://localhost:4318/v1/traces")
+                .replace("/v1/traces", "/v1/metrics"),
+            )
+            readers.append(
+                PeriodicExportingMetricReader(
+                    OTLPMetricExporter(endpoint=metrics_endpoint),
+                    export_interval_millis=15000,
+                )
+            )
+            logger.info("OTLP metrics push to %s", metrics_endpoint)
+        except Exception:
+            logger.warning("Failed to set up OTLP metric exporter", exc_info=True)
     elif exporter_mode == "console":
         from opentelemetry.sdk.metrics.export import (
             ConsoleMetricExporter,

@@ -48,8 +48,8 @@ services:
       - "3001:3000"    # Grafana (3000 taken by frontend)
       - "4318:4318"    # OTLP HTTP receiver
     volumes:
-      - ./grafana/dashboards:/var/lib/grafana/dashboards
-      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+      - ./grafana/dashboards/starlight-overview.json:/otel-lgtm/starlight-overview.json:ro
+      - ./grafana/provisioning/dashboards/default.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/starlight.yaml:ro
     profiles: [observability]
 
 volumes:
