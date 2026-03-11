@@ -25,14 +25,5 @@ data:
           path: /data/tempo/traces
         wal:
           path: /data/tempo/wal
-
-    compactor:
-      compaction:
-        block_retention: 72h
-
-    metrics_generator:
-      registry:
-        external_labels:
-          source: tempo
-      storage:
-        path: /data/tempo/generator/wal
+        block:
+          bloom_filter_false_positive: 0.05

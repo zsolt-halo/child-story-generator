@@ -79,9 +79,11 @@ def setup_telemetry(app: FastAPI) -> None:
     readers = []
     if exporter_mode == "otlp":
         try:
+            from prometheus_client import start_http_server
             from opentelemetry.exporter.prometheus import PrometheusMetricReader
             reader = PrometheusMetricReader()
             readers.append(reader)
+            start_http_server(port=9464)
             logger.info("Prometheus metrics available on :9464/metrics")
         except Exception:
             logger.warning("Failed to start Prometheus metric reader", exc_info=True)
