@@ -5,7 +5,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Coroutine
 
+from opentelemetry import trace
+
 logger = logging.getLogger(__name__)
+tracer = trace.get_tracer("starlight.task")
 
 
 class TaskStatus(str, Enum):
@@ -61,19 +64,42 @@ class TaskManager:
         info.status = TaskStatus.RUNNING
         logger.info("Task started: %s", task_id)
         await self.broadcast(task_id, {"type": "task_start", "task_id": task_id})
+
+        # Track active tasks metric
         try:
-            result = await coro_fn(task_id, *args, **kwargs)
-            info.status = TaskStatus.COMPLETED
-            info.result = result or {}
-            logger.info("Task completed: %s", task_id)
-            await self.broadcast(task_id, {"type": "task_complete", "task_id": task_id, "result": info.result})
-        except Exception as e:
-            info.status = TaskStatus.FAILED
-            info.error = str(e)
-            logger.error("Task %s failed: %s", task_id, e, exc_info=True)
-            await self.broadcast(task_id, {"type": "error", "task_id": task_id, "error": str(e)})
-        finally:
-            self._schedule_cleanup(task_id)
+            from server.telemetry import active_pipeline_tasks
+            if active_pipeline_tasks:
+                active_pipeline_tasks.add(1)
+        except ImportError:
+            pass
+        _metric_tracked = True
+
+        with tracer.start_as_current_span(
+            "task.run",
+            attributes={"task.id": task_id, "task.function": coro_fn.__name__},
+        ) as span:
+            try:
+                result = await coro_fn(task_id, *args, **kwargs)
+                info.status = TaskStatus.COMPLETED
+                info.result = result or {}
+                span.set_attribute("task.status", "completed")
+                logger.info("Task completed: %s", task_id)
+                await self.broadcast(task_id, {"type": "task_complete", "task_id": task_id, "result": info.result})
+            except Exception as e:
+                info.status = TaskStatus.FAILED
+                info.error = str(e)
+                span.set_status(trace.StatusCode.ERROR, str(e))
+                span.record_exception(e)
+                logger.error("Task %s failed: %s", task_id, e, exc_info=True)
+                await self.broadcast(task_id, {"type": "error", "task_id": task_id, "error": str(e)})
+            finally:
+                try:
+                    from server.telemetry import active_pipeline_tasks as apt
+                    if apt:
+                        apt.add(-1)
+                except ImportError:
+                    pass
+                self._schedule_cleanup(task_id)
 
     async def _run_exclusive(self, task_id: str, info: TaskInfo, coro_fn: Callable, *args, **kwargs):
         """Run a task with exclusive pipeline lock, broadcasting queue position while waiting."""

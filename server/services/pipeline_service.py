@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from opentelemetry import trace
+
 from src.models import BookConfig, Character, Story
 from src.utils.config import build_config, load_style, async_resolve_character
 from src.utils.io import slugify
@@ -15,6 +17,7 @@ from src.utils.io import slugify
 from server.services.task_manager import task_manager
 
 logger = logging.getLogger(__name__)
+tracer = trace.get_tracer("starlight.pipeline")
 
 # Background task refs to prevent GC of fire-and-forget coroutines
 _background_tasks: set[asyncio.Task] = set()
@@ -137,6 +140,16 @@ async def _load_pipeline_context(slug: str) -> PipelineContext:
     )
 
 
+def _record_phase_metric(phase: str, elapsed: float) -> None:
+    """Record phase duration metric. No-op when telemetry is unavailable."""
+    try:
+        from server.telemetry import pipeline_phase_duration
+        if pipeline_phase_duration:
+            pipeline_phase_duration.record(elapsed, {"phase": phase})
+    except ImportError:
+        pass
+
+
 @asynccontextmanager
 async def _phase(task_id: str, phase: str, message: str, **extra_data):
     """Broadcast phase_start/phase_complete and log timing."""
@@ -146,8 +159,13 @@ async def _phase(task_id: str, phase: str, message: str, **extra_data):
     await task_manager.broadcast(task_id, start_event)
     t = _time.monotonic()
     result: dict = {}
-    yield result  # caller can set result["data"] for the complete event
-    elapsed = _time.monotonic() - t
+    with tracer.start_as_current_span(
+        f"pipeline.{phase}",
+        attributes={"pipeline.task_id": task_id, "pipeline.phase": phase},
+    ) as span:
+        yield result  # caller can set result["data"] for the complete event
+        elapsed = _time.monotonic() - t
+        span.set_attribute("pipeline.elapsed", round(elapsed, 1))
     logger.info("Phase %s completed in %.1fs", phase, elapsed)
     complete_event: dict = {"type": "phase_complete", "phase": phase, "elapsed": round(elapsed, 1)}
     if result:
@@ -157,6 +175,7 @@ async def _phase(task_id: str, phase: str, message: str, **extra_data):
     task = asyncio.create_task(_record_phase_timing(phase, elapsed))
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
+    _record_phase_metric(phase, elapsed)
 
 
 async def _illustrate_keyframes(
@@ -225,6 +244,8 @@ async def run_full_pipeline(
     """Run the full pipeline: story → keyframes → translation → illustrations → backdrops → PDF."""
     logger.info("run_full_pipeline: task=%s character=%s style=%s pages=%d", task_id, character, style, pages)
     t0 = _time.monotonic()
+    span = trace.get_current_span()
+    span.set_attribute("pipeline.type", "full")
     config = build_config(character=character, narrator=narrator, style=style, pages=pages)
     char = await async_resolve_character(config.character)
     style_data = load_style(config.style)
@@ -323,6 +344,8 @@ async def run_story_only(
 ) -> dict:
     """Run Phase 1+2 only (story + keyframes)."""
     logger.info("run_story_only: task=%s character=%s style=%s", task_id, character, style)
+    span = trace.get_current_span()
+    span.set_attribute("pipeline.type", "story_only")
     config = build_config(character=character, narrator=narrator, style=style, pages=pages)
     char = await async_resolve_character(config.character)
     style_data = load_style(config.style)
@@ -459,6 +482,9 @@ async def run_continue_pipeline(task_id: str, slug: str, cast_edited: bool = Fal
     run_after_cover_selection() finishes with page illustrations → backdrops → PDF.
     """
     logger.info("run_continue_pipeline: task=%s slug=%s cast_edited=%s", task_id, slug, cast_edited)
+    span = trace.get_current_span()
+    span.set_attribute("pipeline.type", "continue")
+    span.set_attribute("pipeline.slug", slug)
     ctx = await _load_pipeline_context(slug)
 
     # Phase 2.5b: Re-run cast rewrite only if the user actually edited the cast
@@ -528,6 +554,10 @@ async def run_continue_pipeline(task_id: str, slug: str, cast_edited: bool = Fal
 async def run_after_cover_selection(task_id: str, slug: str, choice: int) -> dict:
     """Continue pipeline after cover selection: copy cover → page illustrations → backdrops → PDF."""
     logger.info("run_after_cover_selection: task=%s slug=%s choice=%d", task_id, slug, choice)
+    span = trace.get_current_span()
+    span.set_attribute("pipeline.type", "after_cover_selection")
+    span.set_attribute("pipeline.slug", slug)
+    span.set_attribute("pipeline.cover_choice", choice)
     import shutil
     ctx = await _load_pipeline_context(slug)
 

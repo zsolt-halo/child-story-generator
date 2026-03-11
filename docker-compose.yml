@@ -20,11 +20,15 @@ services:
     build: .
     ports:
       - "8000:8000"
+      - "9464:9464"
     env_file: .env
     environment:
       DATABASE_URL: postgresql+asyncpg://starlight:starlight@postgres:5432/starlight
       CORS_ORIGINS: "http://localhost:5173,http://localhost:3000"
       LOG_LEVEL: DEBUG
+      OTEL_EXPORTER: "${OTEL_EXPORTER:-none}"
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-lgtm:4318/v1/traces"
+      OTEL_SERVICE_NAME: "starlight-backend"
     volumes:
       - stories-data:/app/stories
     depends_on:
@@ -37,6 +41,16 @@ services:
       - "3000:3000"
     depends_on:
       - backend
+
+  otel-lgtm:
+    image: grafana/otel-lgtm:latest
+    ports:
+      - "3001:3000"    # Grafana (3000 taken by frontend)
+      - "4318:4318"    # OTLP HTTP receiver
+    volumes:
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+    profiles: [observability]
 
 volumes:
   postgres-data:

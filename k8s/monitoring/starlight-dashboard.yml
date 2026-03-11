@@ -1,0 +1,418 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: starlight-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  starlight-overview.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "links": [],
+      "panels": [
+        {
+          "collapsed": false,
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+          "id": 100,
+          "title": "Overview",
+          "type": "row"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 1 },
+                  { "color": "red", "value": 3 }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+          "id": 1,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "textMode": "auto"
+          },
+          "title": "Active Pipeline Tasks",
+          "type": "stat",
+          "targets": [
+            { "expr": "starlight_pipeline_active_tasks", "legendFormat": "Active" }
+          ]
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": { "steps": [{ "color": "blue", "value": null }] }
+            },
+            "overrides": []
+          },
+          "gridPos": { "h": 4, "w": 5, "x": 4, "y": 1 },
+          "id": 2,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "textMode": "auto"
+          },
+          "title": "Books Generated (24h)",
+          "type": "stat",
+          "targets": [
+            { "expr": "sum(increase(starlight_pipeline_phase_duration_seconds_count{phase=\"pdf\"}[$__range])) or vector(0)", "legendFormat": "Books" }
+          ]
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": { "steps": [{ "color": "purple", "value": null }] }
+            },
+            "overrides": []
+          },
+          "gridPos": { "h": 4, "w": 5, "x": 9, "y": 1 },
+          "id": 3,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "textMode": "auto"
+          },
+          "title": "Gemini API Calls (24h)",
+          "type": "stat",
+          "targets": [
+            { "expr": "sum(increase(starlight_gemini_api_calls_total[$__range])) or vector(0)", "legendFormat": "Calls" }
+          ]
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "unit": "percentunit",
+              "thresholds": {
+                "steps": [
+                  { "color": "red", "value": null },
+                  { "color": "yellow", "value": 0.8 },
+                  { "color": "green", "value": 0.95 }
+                ]
+              },
+              "min": 0, "max": 1
+            },
+            "overrides": []
+          },
+          "gridPos": { "h": 4, "w": 5, "x": 14, "y": 1 },
+          "id": 4,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "textMode": "auto"
+          },
+          "title": "Image Success Rate",
+          "type": "stat",
+          "targets": [
+            { "expr": "sum(increase(starlight_image_generation_results_total{result=\"success\"}[$__range])) / clamp_min(sum(increase(starlight_image_generation_results_total[$__range])), 1)", "legendFormat": "Success" }
+          ]
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "unit": "currencyUSD",
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 5 },
+                  { "color": "red", "value": 20 }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": { "h": 4, "w": 5, "x": 19, "y": 1 },
+          "id": 5,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "textMode": "auto"
+          },
+          "title": "Est. Gemini Cost (24h)",
+          "description": "Rough estimate: $0.04/image call, $0.06/text call",
+          "type": "stat",
+          "targets": [
+            { "expr": "(sum(increase(starlight_gemini_api_calls_total{type=\"image\"}[$__range])) or vector(0)) * 0.04 + (sum(increase(starlight_gemini_api_calls_total{type=~\"text|structured|multimodal\"}[$__range])) or vector(0)) * 0.06", "legendFormat": "Cost" }
+          ]
+        },
+        {
+          "collapsed": false,
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+          "id": 101,
+          "title": "Pipeline Phases",
+          "type": "row"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "unit": "s",
+              "custom": {
+                "fillOpacity": 80, "lineWidth": 0, "drawStyle": "bars",
+                "barAlignment": 0, "stacking": { "mode": "none" }, "showPoints": "never"
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+          "id": 10,
+          "options": {
+            "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max", "lastNotNull"] },
+            "tooltip": { "mode": "multi" }
+          },
+          "title": "Phase Duration (p95)",
+          "type": "timeseries",
+          "targets": [
+            { "expr": "histogram_quantile(0.95, sum by (le, phase) (rate(starlight_pipeline_phase_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "{{phase}}" }
+          ]
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": { "color": { "mode": "palette-classic" }, "unit": "s" },
+            "overrides": []
+          },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+          "id": 11,
+          "options": {
+            "orientation": "horizontal",
+            "displayMode": "gradient",
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "showUnfilled": true
+          },
+          "title": "Avg Phase Duration (latest)",
+          "description": "Average duration of each pipeline phase from recent runs",
+          "type": "bargauge",
+          "targets": [
+            { "expr": "sum by (phase) (rate(starlight_pipeline_phase_duration_seconds_sum[$__rate_interval])) / clamp_min(sum by (phase) (rate(starlight_pipeline_phase_duration_seconds_count[$__rate_interval])), 1)", "legendFormat": "{{phase}}" }
+          ]
+        },
+        {
+          "collapsed": false,
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
+          "id": 102,
+          "title": "Gemini API",
+          "type": "row"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" }, "unit": "ops",
+              "custom": {
+                "fillOpacity": 20, "lineWidth": 2, "drawStyle": "line",
+                "stacking": { "mode": "normal" }, "showPoints": "never"
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": { "h": 8, "w": 8, "x": 0, "y": 15 },
+          "id": 20,
+          "options": {
+            "legend": { "displayMode": "list", "placement": "bottom" },
+            "tooltip": { "mode": "multi" }
+          },
+          "title": "API Call Rate",
+          "type": "timeseries",
+          "targets": [
+            { "expr": "sum by (type) (rate(starlight_gemini_api_calls_total[$__rate_interval]))", "legendFormat": "{{type}}" }
+          ]
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" }, "unit": "s",
+              "custom": {
+                "fillOpacity": 10, "lineWidth": 2, "drawStyle": "line",
+                "stacking": { "mode": "none" }, "showPoints": "never"
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": { "h": 8, "w": 8, "x": 8, "y": 15 },
+          "id": 21,
+          "options": {
+            "legend": { "displayMode": "list", "placement": "bottom" },
+            "tooltip": { "mode": "multi" }
+          },
+          "title": "API Latency by Type (p95)",
+          "type": "timeseries",
+          "targets": [
+            { "expr": "histogram_quantile(0.95, sum by (le, type) (rate(starlight_gemini_api_latency_seconds_bucket[$__rate_interval])))", "legendFormat": "p95 {{type}}" },
+            { "expr": "histogram_quantile(0.50, sum by (le, type) (rate(starlight_gemini_api_latency_seconds_bucket[$__rate_interval])))", "legendFormat": "p50 {{type}}" }
+          ]
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": { "color": { "mode": "palette-classic" } },
+            "overrides": []
+          },
+          "gridPos": { "h": 8, "w": 8, "x": 16, "y": 15 },
+          "id": 22,
+          "options": {
+            "legend": { "displayMode": "list", "placement": "right" },
+            "tooltip": { "mode": "single" },
+            "reduceOptions": { "calcs": ["sum"] },
+            "pieType": "donut"
+          },
+          "title": "Calls by Type",
+          "type": "piechart",
+          "targets": [
+            { "expr": "sum by (type) (increase(starlight_gemini_api_calls_total[$__range]))", "legendFormat": "{{type}}" }
+          ]
+        },
+        {
+          "collapsed": false,
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 },
+          "id": 103,
+          "title": "Image Generation",
+          "type": "row"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" }, "unit": "ops",
+              "custom": {
+                "fillOpacity": 30, "lineWidth": 2, "drawStyle": "line",
+                "stacking": { "mode": "normal" }, "showPoints": "never"
+              }
+            },
+            "overrides": [
+              { "matcher": { "id": "byName", "options": "failure" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] },
+              { "matcher": { "id": "byName", "options": "success" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] }
+            ]
+          },
+          "gridPos": { "h": 8, "w": 8, "x": 0, "y": 24 },
+          "id": 30,
+          "options": {
+            "legend": { "displayMode": "list", "placement": "bottom" },
+            "tooltip": { "mode": "multi" }
+          },
+          "title": "Image Generation Rate",
+          "type": "timeseries",
+          "targets": [
+            { "expr": "sum by (result) (rate(starlight_image_generation_results_total[$__rate_interval]))", "legendFormat": "{{result}}" }
+          ]
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": { "steps": [{ "color": "green", "value": null }] }
+            },
+            "overrides": []
+          },
+          "gridPos": { "h": 4, "w": 8, "x": 8, "y": 24 },
+          "id": 31,
+          "options": {
+            "colorMode": "background", "graphMode": "area", "justifyMode": "auto",
+            "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto"
+          },
+          "title": "Images Generated (total)",
+          "type": "stat",
+          "targets": [
+            { "expr": "sum(increase(starlight_image_generation_results_total{result=\"success\"}[$__range])) or vector(0)", "legendFormat": "Success" }
+          ]
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+            },
+            "overrides": []
+          },
+          "gridPos": { "h": 4, "w": 8, "x": 8, "y": 28 },
+          "id": 32,
+          "options": {
+            "colorMode": "background", "graphMode": "area", "justifyMode": "auto",
+            "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto"
+          },
+          "title": "Image Failures (total)",
+          "type": "stat",
+          "targets": [
+            { "expr": "sum(increase(starlight_image_generation_results_total{result=\"failure\"}[$__range])) or vector(0)", "legendFormat": "Failures" }
+          ]
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": { "color": { "mode": "palette-classic" } },
+            "overrides": []
+          },
+          "gridPos": { "h": 8, "w": 8, "x": 16, "y": 24 },
+          "id": 33,
+          "options": {
+            "legend": { "displayMode": "list", "placement": "right" },
+            "tooltip": { "mode": "single" },
+            "reduceOptions": { "calcs": ["sum"] },
+            "pieType": "donut"
+          },
+          "title": "Images by Model",
+          "type": "piechart",
+          "targets": [
+            { "expr": "sum by (model) (increase(starlight_image_generation_results_total[$__range]))", "legendFormat": "{{model}}" }
+          ]
+        }
+      ],
+      "refresh": "30s",
+      "schemaVersion": 39,
+      "tags": ["starlight"],
+      "templating": {
+        "list": [
+          {
+            "current": {},
+            "hide": 0,
+            "includeAll": false,
+            "label": "Datasource",
+            "multi": false,
+            "name": "datasource",
+            "options": [],
+            "query": "prometheus",
+            "refresh": 1,
+            "regex": "",
+            "type": "datasource"
+          }
+        ]
+      },
+      "time": { "from": "now-24h", "to": "now" },
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "StarlightScribe Overview",
+      "uid": "starlight-overview",
+      "version": 1
+    }

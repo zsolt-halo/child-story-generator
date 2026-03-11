@@ -28,7 +28,9 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Run DB table creation as a dev safety net on startup."""
+    """Initialize telemetry then run DB table creation as a dev safety net on startup."""
+    from server.telemetry import setup_telemetry, shutdown_telemetry
+    setup_telemetry(app)
     try:
         from src.db.engine import get_async_engine
         from src.db.models import Base
@@ -39,6 +41,7 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.debug("DB auto-create skipped (not configured)", exc_info=True)
     yield
+    shutdown_telemetry()
 
 
 app = FastAPI(

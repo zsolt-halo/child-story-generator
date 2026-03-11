@@ -21,7 +21,18 @@ dependencies = [
 
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.52.0"]
-web = ["fastapi>=0.115.0", "uvicorn[standard]>=0.34.0", "python-multipart>=0.0.20"]
+otel = [
+    "opentelemetry-api>=1.29",
+    "opentelemetry-sdk>=1.29",
+    "opentelemetry-exporter-otlp-proto-http>=1.29",
+    "opentelemetry-exporter-prometheus>=0.50b0",
+    "opentelemetry-instrumentation-fastapi>=0.50b0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.50b0",
+    "opentelemetry-instrumentation-httpx>=0.50b0",
+    "opentelemetry-instrumentation-requests>=0.50b0",
+    "opentelemetry-instrumentation-logging>=0.50b0",
+]
+web = ["fastapi>=0.115.0", "uvicorn[standard]>=0.34.0", "python-multipart>=0.0.20", "starlight-scribe[otel]"]
 
 [project.scripts]
 starlight = "main:cli"

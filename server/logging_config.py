@@ -28,5 +28,6 @@ def setup_logging() -> None:
         "PIL",
         "weasyprint",
         "fontTools",
+        "opentelemetry",
     ):
         logging.getLogger(name).setLevel(logging.WARNING)

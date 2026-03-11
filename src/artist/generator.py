@@ -7,12 +7,24 @@ from pathlib import Path
 
 from google import genai
 from google.genai import types
+from opentelemetry import trace
 from PIL import Image
 from rich.progress import Progress
 
 from src.models import BookConfig, CastMember, Character, Keyframe
 
 logger = logging.getLogger(__name__)
+tracer = trace.get_tracer("starlight.artist")
+
+
+def _record_image_result(result: str, model: str) -> None:
+    """Record image generation success/failure metric. No-op when telemetry is unavailable."""
+    try:
+        from server.telemetry import image_generation_results
+        if image_generation_results:
+            image_generation_results.add(1, {"result": result, "model": model})
+    except ImportError:
+        pass
 
 RETRY_DELAY = 10.0
 MAX_RETRIES = 5
@@ -89,35 +101,45 @@ def generate_single_image(
         contents = prompt
 
     logger.debug("Generating image: %s (model=%s)", output_path.name, model)
-    for attempt in range(MAX_RETRIES):
-        try:
-            response = client.models.generate_content(
-                model=model,
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    response_modalities=["IMAGE", "TEXT"],
-                ),
-            )
-
-            image_bytes = _extract_image_bytes(response)
-            if not image_bytes:
-                raise RuntimeError("No image data in response")
-
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_bytes(image_bytes)
-            logger.info("Image saved: %s (%d KB)", output_path.name, len(image_bytes) // 1024)
-            return output_path
-
-        except Exception as e:
-            if attempt < MAX_RETRIES - 1:
-                delay = RETRY_DELAY * (2 ** attempt)  # exponential backoff: 10, 20, 40, 80s
-                logger.warning(
-                    "Image gen attempt %d/%d failed: %s — retrying in %.0fs",
-                    attempt + 1, MAX_RETRIES, e, delay,
+    with tracer.start_as_current_span(
+        "image.generate",
+        attributes={"image.model": model, "image.output": output_path.name},
+    ) as span:
+        for attempt in range(MAX_RETRIES):
+            try:
+                response = client.models.generate_content(
+                    model=model,
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        response_modalities=["IMAGE", "TEXT"],
+                    ),
                 )
-                time.sleep(delay)
-            else:
-                raise RuntimeError(f"Image generation failed after {MAX_RETRIES} attempts: {e}") from e
+
+                image_bytes = _extract_image_bytes(response)
+                if not image_bytes:
+                    raise RuntimeError("No image data in response")
+
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_bytes(image_bytes)
+                span.set_attribute("image.size_kb", len(image_bytes) // 1024)
+                logger.info("Image saved: %s (%d KB)", output_path.name, len(image_bytes) // 1024)
+                _record_image_result("success", model)
+                return output_path
+
+            except Exception as e:
+                span.add_event("retry", {"attempt": attempt + 1, "error": str(e)})
+                if attempt < MAX_RETRIES - 1:
+                    delay = RETRY_DELAY * (2 ** attempt)  # exponential backoff: 10, 20, 40, 80s
+                    logger.warning(
+                        "Image gen attempt %d/%d failed: %s — retrying in %.0fs",
+                        attempt + 1, MAX_RETRIES, e, delay,
+                    )
+                    time.sleep(delay)
+                else:
+                    span.set_status(trace.StatusCode.ERROR, str(e))
+                    span.record_exception(e)
+                    _record_image_result("failure", model)
+                    raise RuntimeError(f"Image generation failed after {MAX_RETRIES} attempts: {e}") from e
 
     raise RuntimeError("Unreachable")
 

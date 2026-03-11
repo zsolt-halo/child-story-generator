@@ -1,0 +1,18 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: starlight-backend
+  namespace: monitoring
+  labels:
+    release: monitoring  # matches kube-prometheus-stack selector
+spec:
+  namespaceSelector:
+    matchNames:
+      - starlight
+  selector:
+    matchLabels:
+      app: backend
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s

@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir --target=/app/deps ".[web]"
+RUN pip install --no-cache-dir --target=/app/deps ".[web,otel]"
 
 
 FROM python:3.12-slim
@@ -58,7 +58,7 @@ RUN useradd -m -u 1001 starlight && \
 
 USER starlight
 
-EXPOSE 8000
+EXPOSE 8000 9464
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')" || exit 1
