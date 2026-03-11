@@ -214,7 +214,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le, phase) (rate(starlight_pipeline_phase_duration_seconds_bucket[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le, phase) (increase(starlight_pipeline_phase_duration_seconds_bucket[$__range])))",
           "legendFormat": "{{phase}}"
         }
       ]
@@ -243,7 +243,7 @@
       "type": "bargauge",
       "targets": [
         {
-          "expr": "sum by (phase) (rate(starlight_pipeline_phase_duration_seconds_sum[$__rate_interval])) / clamp_min(sum by (phase) (rate(starlight_pipeline_phase_duration_seconds_count[$__rate_interval])), 1)",
+          "expr": "sum by (phase) (increase(starlight_pipeline_phase_duration_seconds_sum[$__range])) / clamp_min(sum by (phase) (increase(starlight_pipeline_phase_duration_seconds_count[$__range])), 1)",
           "legendFormat": "{{phase}}"
         }
       ]
@@ -277,11 +277,11 @@
         "legend": { "displayMode": "list", "placement": "bottom" },
         "tooltip": { "mode": "multi" }
       },
-      "title": "API Call Rate",
+      "title": "API Calls",
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum by (type) (rate(starlight_gemini_api_calls_total[$__rate_interval]))",
+          "expr": "sum by (type) (increase(starlight_gemini_api_calls_total[$__range]))",
           "legendFormat": "{{type}}"
         }
       ]
@@ -312,11 +312,11 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le, type) (rate(starlight_gemini_api_latency_seconds_bucket[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le, type) (increase(starlight_gemini_api_latency_seconds_bucket[$__range])))",
           "legendFormat": "p95 {{type}}"
         },
         {
-          "expr": "histogram_quantile(0.50, sum by (le, type) (rate(starlight_gemini_api_latency_seconds_bucket[$__rate_interval])))",
+          "expr": "histogram_quantile(0.50, sum by (le, type) (increase(starlight_gemini_api_latency_seconds_bucket[$__range])))",
           "legendFormat": "p50 {{type}}"
         }
       ]
@@ -384,11 +384,11 @@
         "legend": { "displayMode": "list", "placement": "bottom" },
         "tooltip": { "mode": "multi" }
       },
-      "title": "Image Generation Rate",
+      "title": "Image Generation",
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum by (result) (rate(starlight_image_generation_results_total[$__rate_interval]))",
+          "expr": "sum by (result) (increase(starlight_image_generation_results_total[$__range]))",
           "legendFormat": "{{result}}"
         }
       ]
