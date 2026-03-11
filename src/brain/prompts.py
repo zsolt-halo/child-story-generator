@@ -1,5 +1,61 @@
 from src.models import Character, CastMember
 
+BODY_PLANS = {
+    "quadruped": {
+        "species": [
+            "llama", "cat", "dog", "fox", "rabbit", "bunny", "bear",
+            "mouse", "hedgehog", "elephant", "lion", "tiger", "deer",
+            "horse", "cow", "pig", "panda",
+        ],
+        "description": "4 legs, no arms or hands",
+        "carrying_examples": (
+            "carry things in their mouth, on their back, in a worn satchel/saddle, "
+            "or hold items between front paws while sitting or standing on hind legs"
+        ),
+    },
+    "bird": {
+        "species": ["owl", "penguin", "duck"],
+        "description": "2 legs, 2 wings (wings are not arms)",
+        "carrying_examples": (
+            "grip with talons or beak, tuck items under a wing, "
+            "or balance objects on their back"
+        ),
+    },
+    "primate": {
+        "species": ["monkey", "ape", "gorilla", "chimpanzee"],
+        "description": "2 legs, 2 arms with hands",
+        "carrying_examples": "use hands, feet, or tail naturally",
+    },
+}
+
+# Reverse lookup: species name -> body plan key
+_species_to_body_plan: dict[str, str] = {}
+for _plan_key, _plan in BODY_PLANS.items():
+    for _sp in _plan["species"]:
+        _species_to_body_plan[_sp] = _plan_key
+
+
+def get_anatomy_note(species: str) -> str:
+    """Return a concise anatomy note for the given species, or empty string for humans/unknown."""
+    species_lower = species.lower()
+    plan_key = _species_to_body_plan.get(species_lower)
+    if not plan_key:
+        return ""
+    plan = BODY_PLANS[plan_key]
+    return (
+        f"A {species_lower} has {plan['description']}. "
+        f"To carry or hold things, they {plan['carrying_examples']}."
+    )
+
+
+def build_anatomy_section(species: str) -> str:
+    """Return an '## Anatomy' section for embedding in system prompts, or empty string."""
+    note = get_anatomy_note(species)
+    if not note:
+        return ""
+    return f"\n## Anatomy\n{note}\n"
+
+
 NARRATOR_PERSONAS = {
     "whimsical": {
         "name": "Whimsical",
@@ -133,10 +189,13 @@ The book will be illustrated in a {style_desc} style. Keep visual descriptions c
 - The child's name is {character.child_name}. The protagonist ({character.name}) mirrors what {character.child_name} did that day.
 - End the story with a warm, satisfying conclusion that circles back to the beginning.
 - Create a short, evocative title for the book.
-- **Preserve user-given names**: If the parent's notes name any character (e.g., "met her friend Lili", "played with Bence"), keep those EXACT names in the story. You may embellish their role, species, or personality, but NEVER rename them."""
+- **Preserve user-given names**: If the parent's notes name any character (e.g., "met her friend Lili", "played with Bence"), keep those EXACT names in the story. You may embellish their role, species, or personality, but NEVER rename them.
+{f"- {character.name} is an animal — they interact with the world using their natural body, not human hands or arms." if not _infer_species(character).startswith("human") and _infer_species(character) != "character" else ""}"""
 
 
 def build_keyframer_system_prompt(character: Character, style_desc: str) -> str:
+    species = _infer_species(character)
+    anatomy = build_anatomy_section(species)
     return f"""You are a children's book art director. Your job is to break a story into pages (keyframes) for a picture book.
 
 ## Character Visual Reference
@@ -144,7 +203,7 @@ def build_keyframer_system_prompt(character: Character, style_desc: str) -> str:
 
 ## Art Style
 {style_desc}
-
+{anatomy}
 ## Instructions
 Given a complete story, split it into pages. For each page:
 1. **page_text**: The exact prose for that page. Distribute the story evenly. Each page should have 2-4 sentences.
@@ -155,6 +214,7 @@ Given a complete story, split it into pages. For each page:
 
 The first keyframe (page 1) should be the story opening. The cover keyframe can be any page.
 Every visual_description must mention: "{character.visual.description}, {character.visual.constants}" to maintain character consistency.
+Respect real animal anatomy in every visual_description. A quadruped has 4 legs, no arms. If a character needs to hold or carry something, describe a natural animal solution.
 Aim for the number of pages specified by the user."""
 
 
@@ -193,6 +253,12 @@ The protagonist is a **{species}**.
 - If the protagonist is an animal, ALL characters should be animals too. Family members (mom, dad, siblings) are the SAME species as the protagonist. Friends and other characters should also be animals — pick a species that fits their personality or role if the story doesn't specify one.
 - If the protagonist is a human, secondary characters should be humans unless the story explicitly introduces animal characters.
 - Whatever species you assign to a character, it must be CONSISTENT across every page they appear on.
+
+## Anatomy
+Match each character's body to their real species:
+- Quadrupeds (llama, cat, fox, etc.): 4 legs, no arms or hands.
+- Birds (owl, penguin, duck): 2 legs, 2 wings — wings are not arms.
+In visual_description, mention the limb structure. For accessories, only use items the animal can naturally wear or carry (e.g., a scarf, a satchel, a collar — not "holding a lantern in her hand").
 
 ## Instructions
 For each secondary character you identify:
@@ -272,6 +338,7 @@ Rewrite each visual_description so that:
 4. No character details contradict the cast sheet
 5. The protagonist's visual constants remain unchanged
 6. The overall length and detail level stay similar to the original
+7. Respect animal anatomy: quadrupeds have 4 legs and no arms. If a character carries or holds something, use a natural method (mouth, back, paws while rearing, etc.)
 
 Output ONLY the rewritten visual descriptions in this exact format:
 ===PAGE 1===
@@ -310,4 +377,5 @@ Flesh out all character fields into a complete, detailed character profile:
 - Characters should be warm, lovable, and easy to illustrate consistently
 - Visual descriptions must be concrete and reproducible for AI image generation
 - Keep accessories simple — complex patterns are hard for image models
-- The character should feel like a beloved stuffed animal come to life"""
+- The character should feel like a beloved stuffed animal come to life
+- If the character is an animal, state their body plan (e.g., "walks on four legs"). Don't describe hand-based actions for animals without hands."""

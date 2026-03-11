@@ -11,6 +11,7 @@ from opentelemetry import trace
 from PIL import Image
 from rich.progress import Progress
 
+from src.brain.prompts import _infer_species, get_anatomy_note
 from src.models import BookConfig, CastMember, Character, Keyframe
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,24 @@ def build_image_prompt(
         )
     else:
         parts.append("No text, no words, no letters in the image.")
+    # Collect anatomy notes for animal species in the scene
+    anatomy_notes: list[str] = []
+    protagonist_species = _infer_species(character)
+    proto_note = get_anatomy_note(protagonist_species)
+    if proto_note:
+        anatomy_notes.append(proto_note)
+    if cast:
+        relevant = [m for m in cast if keyframe.page_number in m.appears_on_pages]
+        seen = {protagonist_species.lower()}
+        for m in relevant:
+            sp = m.species.lower() if m.species else ""
+            if sp and sp not in seen:
+                seen.add(sp)
+                note = get_anatomy_note(sp)
+                if note:
+                    anatomy_notes.append(note)
+    if anatomy_notes:
+        parts.append("Anatomy: " + " ".join(anatomy_notes))
     parts.append("Square aspect ratio, high detail, children's book illustration.")
     return ". ".join(parts)
 
@@ -86,17 +105,23 @@ def generate_single_image(
     model: str,
     output_path: Path,
     reference_image: bytes | None = None,
+    additional_references: list[bytes] | None = None,
 ) -> Path:
     """Generate a single image via Gemini and save it to disk.
 
     If reference_image bytes are provided, they are sent as a visual reference
-    alongside the text prompt for character consistency.
+    alongside the text prompt for character consistency.  additional_references
+    adds extra reference sheets (e.g. per-cast-member) as multimodal Parts.
     """
-    if reference_image is not None:
-        contents = [
-            types.Part.from_bytes(data=reference_image, mime_type="image/png"),
-            prompt,
-        ]
+    has_refs = reference_image is not None or additional_references
+    if has_refs:
+        contents: list = []
+        if reference_image is not None:
+            contents.append(types.Part.from_bytes(data=reference_image, mime_type="image/png"))
+        if additional_references:
+            for ref in additional_references:
+                contents.append(types.Part.from_bytes(data=ref, mime_type="image/png"))
+        contents.append(prompt)
     else:
         contents = prompt
 
@@ -179,6 +204,8 @@ def generate_reference_sheet(
         logger.debug("Reference sheet already exists, skipping")
         return final_path
 
+    species = _infer_species(character)
+    anatomy_note = get_anatomy_note(species)
     prompt = (
         f"Character model sheet / reference sheet for a children's book character. "
         f"Show the character in multiple poses: front view, three-quarter view, side view, "
@@ -190,6 +217,8 @@ def generate_reference_sheet(
         f"Professional character turnaround sheet for animation/illustration reference. "
         f"Square format."
     )
+    if anatomy_note:
+        prompt += f" {anatomy_note}"
 
     try:
         logger.info("Generating reference sheet for %s", character.name)
@@ -249,6 +278,71 @@ def load_reference_sheet(images_dir: Path) -> bytes | None:
     return None
 
 
+def generate_cast_reference_sheet(
+    member: CastMember,
+    style_anchor: str,
+    config: BookConfig,
+    output_dir: Path,
+) -> Path | None:
+    """Generate a reference/model sheet for a secondary cast member.
+
+    Returns the path to the saved reference sheet, or None if generation fails.
+    Skips generation if the file already exists (resume-safe).
+    """
+    from src.utils.io import slugify
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    name_slug = slugify(member.name)
+    final_path = output_dir / f"ref_{name_slug}.png"
+
+    if final_path.exists():
+        logger.debug("Cast ref sheet for %s already exists, skipping", member.name)
+        return final_path
+
+    member_species = member.species.lower() if member.species else ""
+    anatomy_note = get_anatomy_note(member_species)
+    prompt = (
+        f"Character model sheet / reference sheet for a children's book character. "
+        f"Show the character in multiple poses: front view, three-quarter view, side view, "
+        f"plus 2-3 facial expressions (happy, surprised, thoughtful). "
+        f"Clean white background, no other characters, no scenery. "
+        f"Character: {member.visual_description}. "
+        f"Visual constants: {member.visual_constants}. "
+        f"Art style: {style_anchor}. "
+        f"Professional character turnaround sheet for animation/illustration reference. "
+        f"Square format."
+    )
+    if anatomy_note:
+        prompt += f" {anatomy_note}"
+
+    try:
+        logger.info("Generating cast reference sheet for %s", member.name)
+        client = create_image_client(config)
+        raw_path = output_dir / f"ref_{name_slug}_raw.png"
+        generate_single_image(client, prompt, config.image_model, raw_path)
+        upscale_for_print(raw_path, final_path)
+        return final_path
+    except Exception:
+        logger.warning("Cast ref sheet generation failed for %s", member.name, exc_info=True)
+        return None
+
+
+def load_cast_reference_sheets(images_dir: Path, cast: list[CastMember]) -> dict[str, bytes]:
+    """Load reference sheet bytes for each cast member that has one on disk.
+
+    Returns {slugified_name: png_bytes}.
+    """
+    from src.utils.io import slugify
+
+    result: dict[str, bytes] = {}
+    for member in cast:
+        name_slug = slugify(member.name)
+        ref_path = images_dir / f"ref_{name_slug}.png"
+        if ref_path.exists():
+            result[name_slug] = ref_path.read_bytes()
+    return result
+
+
 def generate_all_illustrations(
     keyframes: list[Keyframe],
     character: Character,
@@ -259,8 +353,11 @@ def generate_all_illustrations(
     title: str = "",
     cast: list[CastMember] | None = None,
     reference_image: bytes | None = None,
+    cast_ref_map: dict[str, bytes] | None = None,
 ) -> list[Path]:
     """Generate illustrations for all keyframes. Skips images that already exist."""
+    from src.utils.io import slugify as _slugify
+
     output_dir.mkdir(parents=True, exist_ok=True)
 
     task_id = None
@@ -283,10 +380,23 @@ def generate_all_illustrations(
         if client is None:
             client = create_image_client(config)
 
+        # Collect per-page cast reference images for members appearing on this page
+        additional_refs: list[bytes] = []
+        if cast_ref_map and cast:
+            for m in cast:
+                if kf.page_number in m.appears_on_pages:
+                    member_slug = _slugify(m.name)
+                    if member_slug in cast_ref_map:
+                        additional_refs.append(cast_ref_map[member_slug])
+
         prompt = build_image_prompt(kf, character, style_anchor, title=title, cast=cast)
 
         raw_path = output_dir / f"{kf.image_prefix}_raw.png"
-        generate_single_image(client, prompt, config.image_model, raw_path, reference_image=reference_image)
+        generate_single_image(
+            client, prompt, config.image_model, raw_path,
+            reference_image=reference_image,
+            additional_references=additional_refs if additional_refs else None,
+        )
 
         upscale_for_print(raw_path, final_path)
 
