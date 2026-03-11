@@ -61,6 +61,15 @@ async def get_story_detail(slug: str):
         if vp.exists():
             cover_variation_urls.append(f"/api/stories/{slug}/images/cover_v{i}.png")
 
+    # Check for per-cast-member reference sheets
+    from src.utils.io import slugify
+    cast_ref_urls: dict[str, str] = {}
+    for member in story.cast:
+        name_slug = slugify(member.name)
+        ref_path = images_dir / f"ref_{name_slug}.png"
+        if ref_path.exists():
+            cast_ref_urls[member.name] = f"/api/stories/{slug}/images/ref_{name_slug}.png"
+
     metadata = await get_metadata(slug)
 
     return {
@@ -70,6 +79,7 @@ async def get_story_detail(slug: str):
         "backdrop_urls": backdrop_urls,
         "cover_variation_urls": cover_variation_urls,
         "reference_sheet_url": reference_sheet_url,
+        "cast_ref_urls": cast_ref_urls,
         "has_pdf": (story_dir / "book.pdf").exists(),
         "has_screen_pdf": (story_dir / "book-screen.pdf").exists(),
         "has_spread_pdf": (story_dir / "book-spreads.pdf").exists(),

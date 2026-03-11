@@ -68,6 +68,11 @@ export const selectCoverAndContinue = (slug: string, choice: number) =>
   });
 export const startCastExtraction = (slug: string) =>
   request<TaskResponse>(`/pipeline/cast/${slug}`, { method: "POST" });
+export const regenerateCastRefSheet = (slug: string, memberName: string) =>
+  request<TaskResponse>(`/pipeline/regenerate-ref-sheet/${slug}`, {
+    method: "POST",
+    body: JSON.stringify({ member_name: memberName }),
+  });
 export const branchStory = (slug: string, req: BranchRequest) =>
   request<TaskResponse>(`/pipeline/branch/${slug}`, { method: "POST", body: JSON.stringify(req) });
 export const startPdf = (slug: string) =>

@@ -38,6 +38,7 @@ class KeyframeUpdate(BaseModel):
     page_text: str | None = None
     visual_description: str | None = None
     mood: str | None = None
+    page_text_translated: str | None = None
 
 
 class CastMemberUpdate(BaseModel):
@@ -58,6 +59,10 @@ class StoryUpdate(BaseModel):
 
 class CoverSelectionRequest(BaseModel):
     choice: int  # 1-based: 1, 2, 3, or 4
+
+
+class RegenerateRefSheetRequest(BaseModel):
+    member_name: str
 
 
 class BranchRequest(BaseModel):
@@ -147,6 +152,7 @@ class CharacterInfo(BaseModel):
 class StyleInfo(BaseModel):
     name: str
     description: str
+    preview_url: str | None = None
 
 
 class NarratorInfo(BaseModel):

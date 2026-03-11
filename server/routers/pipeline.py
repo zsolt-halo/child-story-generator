@@ -4,7 +4,7 @@ import json
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from server.schemas import PipelineStartRequest, TranslateRequest, TaskResponse, TaskStatusResponse, BranchRequest, CoverSelectionRequest
+from server.schemas import PipelineStartRequest, TranslateRequest, TaskResponse, TaskStatusResponse, BranchRequest, CoverSelectionRequest, RegenerateRefSheetRequest
 from server.services.task_manager import task_manager
 from server.services import pipeline_service
 
@@ -112,6 +112,18 @@ async def select_cover(slug: str, req: CoverSelectionRequest):
         pipeline_service.run_after_cover_selection,
         slug=slug,
         choice=req.choice,
+        exclusive=True,
+    )
+    return TaskResponse(task_id=task_id)
+
+
+@router.post("/regenerate-ref-sheet/{slug}", response_model=TaskResponse)
+async def regenerate_ref_sheet(slug: str, req: RegenerateRefSheetRequest):
+    """Regenerate a single cast member's reference sheet."""
+    task_id = task_manager.create_task(
+        pipeline_service.run_regenerate_cast_ref_sheet,
+        slug=slug,
+        member_name=req.member_name,
         exclusive=True,
     )
     return TaskResponse(task_id=task_id)

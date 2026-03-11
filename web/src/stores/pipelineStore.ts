@@ -21,6 +21,8 @@ interface PipelineState {
   resultSlug: string | null;
   resultTitle: string | null;
   castMembers: CastMember[];
+  castRefUrls: Record<string, string>;
+  mainRefSheetUrl: string | null;
   waitingForStoryReview: boolean;
   waitingForCastReview: boolean;
   coverVariations: CoverVariation[];
@@ -43,6 +45,8 @@ interface PipelineState {
     waitingForCoverSelection?: boolean;
     castMembers?: CastMember[];
     coverVariations?: CoverVariation[];
+    castRefUrls?: Record<string, string>;
+    mainRefSheetUrl?: string | null;
   }) => void;
   reset: () => void;
 }
@@ -60,6 +64,8 @@ const initialState = {
   resultSlug: null,
   resultTitle: null,
   castMembers: [] as CastMember[],
+  castRefUrls: {} as Record<string, string>,
+  mainRefSheetUrl: null as string | null,
   waitingForStoryReview: false,
   waitingForCastReview: false,
   coverVariations: [] as CoverVariation[],
@@ -117,6 +123,10 @@ export const usePipelineStore = create<PipelineState>((set) => ({
           if (phase === "cast" && event.data?.members) {
             updates.castMembers = event.data.members as CastMember[];
           }
+          // Capture main character reference sheet URL
+          if (phase === "reference_sheet" && event.data?.url) {
+            updates.mainRefSheetUrl = event.data.url as string;
+          }
           return updates;
         }
         case "image_complete":
@@ -132,6 +142,12 @@ export const usePipelineStore = create<PipelineState>((set) => ({
             ],
             imageProgress: event.progress ?? state.imageProgress,
             imageTotal: event.total ?? state.imageTotal,
+          };
+        case "cast_ref_complete":
+          return {
+            castRefUrls: event.name && event.url
+              ? { ...state.castRefUrls, [event.name]: event.url }
+              : state.castRefUrls,
           };
         case "cover_variation_complete":
           return {
@@ -150,6 +166,17 @@ export const usePipelineStore = create<PipelineState>((set) => ({
           const resultCovers = result.cover_variations as CoverVariation[] | undefined;
           const covers = resultCovers?.length ? resultCovers : state.coverVariations;
 
+          // Capture cast ref URLs from result if available
+          const resultCastRefUrls = result.cast_ref_urls as Array<{ name: string; url: string }> | undefined;
+          const castRefUrlsFromResult: Record<string, string> = {};
+          if (resultCastRefUrls) {
+            for (const item of resultCastRefUrls) {
+              if (item.url) castRefUrlsFromResult[item.name] = item.url;
+            }
+          }
+          const mergedCastRefUrls = { ...state.castRefUrls, ...castRefUrlsFromResult };
+          const mainRef = (result.reference_sheet_url as string) ?? state.mainRefSheetUrl;
+
           // If story+keyframes done but no cast yet, pause for story review
           const shouldWaitStory = hasKeyframes && !hasCast && state.images.length === 0 && covers.length === 0;
           // If cast present but no images, pause for cast review
@@ -164,6 +191,8 @@ export const usePipelineStore = create<PipelineState>((set) => ({
             waitingForCastReview: shouldWaitCast,
             waitingForCoverSelection: shouldWaitCover,
             coverVariations: covers,
+            castRefUrls: mergedCastRefUrls,
+            mainRefSheetUrl: mainRef,
           };
         }
         case "error":
@@ -175,11 +204,13 @@ export const usePipelineStore = create<PipelineState>((set) => ({
 
   restoreState: (data) => {
     // Determine which phase to mark as current so the timeline
-    // shows prior phases as done (green checkmarks)
+    // shows prior phases as done (green checkmarks).
+    // cast_reference_sheets comes after cast in the timeline, so if we have
+    // cast ref URLs, mark that phase as the latest completed.
     const phase = data.waitingForCoverSelection
       ? "cover_variations"
       : data.waitingForCastReview
-        ? "cast"
+        ? "cast_reference_sheets"
         : data.waitingForStoryReview
           ? "keyframes"
           : null;
@@ -195,6 +226,8 @@ export const usePipelineStore = create<PipelineState>((set) => ({
       waitingForCoverSelection: data.waitingForCoverSelection ?? false,
       castMembers: data.castMembers ?? [],
       coverVariations: data.coverVariations ?? [],
+      castRefUrls: data.castRefUrls ?? {},
+      mainRefSheetUrl: data.mainRefSheetUrl ?? null,
     });
   },
 

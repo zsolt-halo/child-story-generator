@@ -59,6 +59,7 @@ export interface StoryDetail {
   backdrop_urls: string[];
   cover_variation_urls: string[];
   reference_sheet_url: string | null;
+  cast_ref_urls: Record<string, string>;
   has_pdf: boolean;
   has_screen_pdf: boolean;
   has_spread_pdf: boolean;
@@ -85,6 +86,7 @@ export interface CharacterInfo {
 export interface StyleInfo {
   name: string;
   description: string;
+  preview_url: string | null;
 }
 
 export interface NarratorInfo {
@@ -136,6 +138,7 @@ export interface SSEEvent {
   index?: number;
   position?: number;
   queue_ahead?: number;
+  name?: string;
 }
 
 export interface SanityIssue {

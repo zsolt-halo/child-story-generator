@@ -18,7 +18,8 @@ export function Pipeline() {
   const {
     taskId, phase, phaseMessage, completed, failed, error,
     images, imageProgress, imageTotal, resultSlug,
-    castMembers, waitingForStoryReview, waitingForCastReview,
+    castMembers, castRefUrls, mainRefSheetUrl,
+    waitingForStoryReview, waitingForCastReview,
     coverVariations, waitingForCoverSelection,
     queuePosition, queueAhead,
     phaseData, phaseElapsed, phaseStartTime,
@@ -79,6 +80,8 @@ export function Pipeline() {
           title: story.title,
           waitingForCastReview: true,
           castMembers: story.cast,
+          castRefUrls: detail.cast_ref_urls ?? {},
+          mainRefSheetUrl: detail.reference_sheet_url ?? null,
         });
       } else if (hasKeyframes && !hasCast) {
         restoreState({
@@ -167,7 +170,7 @@ export function Pipeline() {
   // Show loading while recovering state from DB
   const isRecovering = !taskId && !hasRestoredState && !!routeSlug;
 
-  const isWideLayout = waitingForStoryReview;
+  const isWideLayout = waitingForStoryReview || waitingForCastReview;
 
   return (
     <div className={`mx-auto ${isWideLayout ? "max-w-5xl" : "max-w-3xl"}`}>
@@ -269,9 +272,12 @@ export function Pipeline() {
           )}
 
           {/* Cast review panel */}
-          {waitingForCastReview && (
+          {waitingForCastReview && resultSlug && (
             <CastReviewPanel
+              slug={resultSlug}
               initialCast={castMembers}
+              castRefUrls={castRefUrls}
+              mainRefSheetUrl={mainRefSheetUrl}
               onApprove={handleCastApprove}
               approving={approving}
             />

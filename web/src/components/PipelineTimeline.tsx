@@ -4,9 +4,10 @@ const PHASES = [
   { key: "story", label: "Story Generation" },
   { key: "keyframes", label: "Page Keyframes" },
   { key: "cast", label: "Cast Extraction" },
+  { key: "reference_sheet", label: "Character Reference" },
+  { key: "cast_reference_sheets", label: "Cast References" },
   { key: "cast_rewrite", label: "Cast Consistency" },
   { key: "translation", label: "Translation" },
-  { key: "reference_sheet", label: "Reference Sheet" },
   { key: "cover_variations", label: "Cover Options" },
   { key: "illustration", label: "Illustrations" },
   { key: "backdrops", label: "Backdrops" },
@@ -37,6 +38,8 @@ function PhaseIcon({ phaseKey }: { phaseKey: string }) {
     case "translation":
       return <svg {...p}><path d="M10.5 21l5.25-11.25L21 21m-9-3h7.5M3 5.621a48.474 48.474 0 016-.371m0 0c1.12 0 2.233.038 3.334.114M9 5.25V3m3.334 2.364C11.176 10.658 7.69 15.08 3 17.502m9.334-12.138c.896.061 1.785.147 2.666.257m-4.589 8.495a18.023 18.023 0 01-3.827-5.802" /></svg>;
     case "reference_sheet":
+      return <svg {...p}><path d="M15 9h3.75M15 12h3.75M15 15h3.75M4.5 19.5h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15A2.25 2.25 0 002.25 6.75v10.5A2.25 2.25 0 004.5 19.5zm6-10.125a1.875 1.875 0 11-3.75 0 1.875 1.875 0 013.75 0zm1.294 6.336a6.721 6.721 0 01-3.17.789 6.721 6.721 0 01-3.168-.789 3.376 3.376 0 016.338 0z" /></svg>;
+    case "cast_reference_sheets":
       return <svg {...p}><path d="M15 9h3.75M15 12h3.75M15 15h3.75M4.5 19.5h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15A2.25 2.25 0 002.25 6.75v10.5A2.25 2.25 0 004.5 19.5zm6-10.125a1.875 1.875 0 11-3.75 0 1.875 1.875 0 013.75 0zm1.294 6.336a6.721 6.721 0 01-3.17.789 6.721 6.721 0 01-3.168-.789 3.376 3.376 0 016.338 0z" /></svg>;
     case "cover_variations":
       return <svg {...p}><path d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21zM16.5 8.25a1.125 1.125 0 11-2.25 0 1.125 1.125 0 012.25 0z" /></svg>;
@@ -69,6 +72,12 @@ function formatPhaseDetail(key: string, data: Record<string, unknown>): string |
       return data.translated_title ? `"${data.translated_title}"` : null;
     case "reference_sheet":
       return data.generated ? "Character sheet ready" : "Skipped";
+    case "cast_reference_sheets":
+      return data.count
+        ? `${data.count} reference sheet${Number(data.count) !== 1 ? "s" : ""} created`
+        : data.regenerated
+          ? `${data.regenerated} sheet${Number(data.regenerated) !== 1 ? "s" : ""} regenerated`
+          : null;
     case "cover_variations":
       return data.count ? `${data.count} options created` : null;
     case "illustration":
@@ -222,7 +231,7 @@ export function PipelineTimeline({
           const isActive = currentIdx === i && !completed && !failed;
           const isWaiting =
             (waitingForStoryReview && phase.key === "keyframes" && completed) ||
-            (waitingForCastReview && phase.key === "cast" && completed) ||
+            (waitingForCastReview && phase.key === "cast_reference_sheets" && completed) ||
             (waitingForCoverSelection && phase.key === "cover_variations" && completed);
           const isFailed = failed && currentIdx === i;
           const isPending = !isDone && !isActive && !isWaiting && !isFailed;
@@ -381,7 +390,7 @@ export function PipelineTimeline({
                 {isWaiting && (
                   <span className="inline-flex items-center gap-1.5 mt-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-semibold tl-fade-in">
                     <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-                    {phase.key === "keyframes" ? "Review needed" : phase.key === "cast" ? "Review needed" : "Selection needed"}
+                    {phase.key === "keyframes" ? "Review needed" : phase.key === "cast_reference_sheets" ? "Review needed" : "Selection needed"}
                   </span>
                 )}
 

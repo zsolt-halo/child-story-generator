@@ -1,10 +1,29 @@
-from fastapi import APIRouter, HTTPException
+from __future__ import annotations
 
-from src.utils.config import CHARACTERS_DIR, load_character, load_style
+import asyncio
+from pathlib import Path
+
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import FileResponse
+
+from src.utils.config import CHARACTERS_DIR, CONFIGS_DIR, load_character, load_style
 from src.brain.prompts import NARRATOR_PERSONAS
 from server.schemas import CharacterInfo, StyleInfo, NarratorInfo
 
 router = APIRouter(prefix="/api/config", tags=["config"])
+
+PREVIEW_DIR = CONFIGS_DIR / "style_previews"
+ALLOWED_PREVIEW_WIDTHS = [200, 400, 600, 800]
+
+
+def _generate_preview_thumb(source: Path, dest: Path, width: int):
+    from PIL import Image
+    with Image.open(source) as img:
+        ratio = width / img.width
+        height = round(img.height * ratio)
+        resized = img.resize((width, height), Image.LANCZOS)
+        resized = resized.convert("RGB")
+        resized.save(dest, "JPEG", quality=82, optimize=True)
 
 
 @router.get("/characters", response_model=list[CharacterInfo])
@@ -46,7 +65,6 @@ async def get_character(name: str):
 @router.get("/styles", response_model=list[StyleInfo])
 async def list_styles():
     import tomllib
-    from src.utils.config import CONFIGS_DIR
 
     styles_path = CONFIGS_DIR / "styles.toml"
     if not styles_path.exists():
@@ -55,10 +73,32 @@ async def list_styles():
     with open(styles_path, "rb") as f:
         data = tomllib.load(f)
 
-    return [
-        StyleInfo(name=name, description=style["description"])
-        for name, style in data.items()
-    ]
+    results = []
+    for name, style in data.items():
+        preview_path = PREVIEW_DIR / f"{name}.png"
+        preview_url = f"/api/config/style-preview/{name}" if preview_path.exists() else None
+        results.append(StyleInfo(name=name, description=style["description"], preview_url=preview_url))
+    return results
+
+
+@router.get("/style-preview/{style_name}")
+async def serve_style_preview(style_name: str, w: int | None = Query(None)):
+    preview_path = PREVIEW_DIR / f"{style_name}.png"
+    if not preview_path.exists():
+        raise HTTPException(status_code=404, detail="Style preview not found")
+
+    if w is None:
+        return FileResponse(preview_path, media_type="image/png")
+
+    width = min(ALLOWED_PREVIEW_WIDTHS, key=lambda x: abs(x - w))
+    thumbs_dir = PREVIEW_DIR / ".thumbs"
+    thumb_path = thumbs_dir / f"{style_name}_w{width}.jpg"
+
+    if not thumb_path.exists():
+        thumbs_dir.mkdir(exist_ok=True)
+        await asyncio.to_thread(_generate_preview_thumb, preview_path, thumb_path, width)
+
+    return FileResponse(thumb_path, media_type="image/jpeg")
 
 
 @router.get("/phase-averages")

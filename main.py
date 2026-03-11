@@ -170,7 +170,10 @@ def generate(notes_file: Path, character: str, narrator: str, style: str, pages:
     console.print(Panel("Generating character reference sheet...", title="Phase 2c: Reference Sheet"))
     with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), transient=True) as progress:
         progress.add_task("Creating character model sheet with Gemini...", total=None)
-        from src.artist.generator import generate_reference_sheet, load_reference_sheet
+        from src.artist.generator import (
+            generate_reference_sheet, load_reference_sheet,
+            generate_cast_reference_sheet, load_cast_reference_sheets,
+        )
         ref_path = generate_reference_sheet(char, style_anchor, config, images_dir)
 
     if ref_path:
@@ -178,7 +181,20 @@ def generate(notes_file: Path, character: str, narrator: str, style: str, pages:
     else:
         console.print("[yellow]Reference sheet generation failed, continuing without it[/yellow]")
 
+    # Phase 2d: Cast reference sheets
+    if story.cast:
+        console.print(Panel(f"Generating {len(story.cast)} cast reference sheets...", title="Phase 2d: Cast References"))
+        for member in story.cast:
+            cast_ref_path = generate_cast_reference_sheet(member, style_anchor, config, images_dir)
+            if cast_ref_path:
+                console.print(f"  [green]{member.name}:[/green] {cast_ref_path.name}")
+            else:
+                console.print(f"  [yellow]{member.name}:[/yellow] generation failed")
+            import time as _time_mod
+            _time_mod.sleep(5.0)
+
     ref_bytes = load_reference_sheet(images_dir)
+    cast_ref_map = load_cast_reference_sheets(images_dir, story.cast) if story.cast else None
     console.print()
 
     cover_title = story.title_translated or story.title
@@ -195,7 +211,7 @@ def generate(notes_file: Path, character: str, narrator: str, style: str, pages:
         image_paths = generate_all_illustrations(
             story.keyframes, char, config, style_anchor, images_dir, progress,
             title=cover_title, cast=story.cast or None,
-            reference_image=ref_bytes,
+            reference_image=ref_bytes, cast_ref_map=cast_ref_map,
         )
 
     # Update DB with image paths

@@ -4,23 +4,12 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { listAllCharacters, getStyles, getNarrators, startStoryOnly, createCharacter, duplicateTemplate } from "../api/client";
 import type { CharacterCreateRequest } from "../api/types";
 import { PickerCard } from "../components/PickerCard";
+import { StyleCard } from "../components/StyleCard";
+import { LanguageSelect } from "../components/LanguageSelect";
 import { CharacterEditor } from "../components/CharacterEditor";
 import { usePipelineStore } from "../stores/pipelineStore";
 
 const STEPS = ["Notes", "Character", "Style & Narrator", "Settings"];
-
-const STYLE_ICONS: Record<string, string> = {
-  digital: "🎨",
-  watercolor: "🖌️",
-  ghibli: "🏯",
-  papercut: "✂️",
-};
-
-const NARRATOR_ICONS: Record<string, string> = {
-  whimsical: "🎪",
-  bedtime: "🌙",
-  heroic: "⚔️",
-};
 
 export function NewStory() {
   const navigate = useNavigate();
@@ -226,13 +215,11 @@ export function NewStory() {
               <p className="text-sm text-bark-400 mb-4">Choose the illustration style</p>
               <div className="grid grid-cols-2 gap-3">
                 {styles?.map((s) => (
-                  <PickerCard
+                  <StyleCard
                     key={s.name}
+                    style={s}
                     selected={style === s.name}
                     onClick={() => setStyle(s.name)}
-                    title={s.name.charAt(0).toUpperCase() + s.name.slice(1)}
-                    description={s.description}
-                    icon={<span>{STYLE_ICONS[s.name] || "🎨"}</span>}
                   />
                 ))}
               </div>
@@ -241,18 +228,43 @@ export function NewStory() {
             <div>
               <h2 className="font-bold text-bark-800 mb-1">Narrator Voice</h2>
               <p className="text-sm text-bark-400 mb-4">Choose the storytelling tone</p>
-              <div className="grid grid-cols-1 gap-3">
+
+              {/* Compact pill selector */}
+              <div className="flex flex-wrap gap-2">
                 {narrators?.map((n) => (
-                  <PickerCard
+                  <button
                     key={n.slug}
-                    selected={narrator === n.slug}
                     onClick={() => setNarrator(n.slug)}
-                    title={n.name}
-                    description={n.example}
-                    icon={<span>{NARRATOR_ICONS[n.slug] || "📖"}</span>}
-                  />
+                    className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${
+                      narrator === n.slug
+                        ? "bg-amber-500 text-white shadow-sm"
+                        : "bg-bark-50 border border-bark-200 text-bark-600 hover:border-amber-300 hover:bg-amber-50"
+                    }`}
+                  >
+                    {n.name}
+                  </button>
                 ))}
               </div>
+
+              {/* Example preview card */}
+              {narrators && (() => {
+                const selected = narrators.find((n) => n.slug === narrator);
+                if (!selected) return null;
+                return (
+                  <div
+                    key={narrator}
+                    className="mt-4 border-l-3 border-amber-400 bg-cream rounded-r-xl pl-4 pr-5 py-4 narrator-example-enter"
+                  >
+                    <p className="font-story italic text-bark-600 text-sm leading-relaxed">
+                      &ldquo;{selected.example}&rdquo;
+                    </p>
+                    <p className="mt-2 text-[11px] text-bark-400">
+                      <span className="font-semibold text-bark-500">{selected.name}</span>
+                      {" — "}{selected.description}
+                    </p>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         )}
@@ -282,16 +294,7 @@ export function NewStory() {
               </div>
             </label>
 
-            <label className="block">
-              <span className="text-xs font-semibold text-bark-500 uppercase tracking-wide">Translation Language (optional)</span>
-              <input
-                type="text"
-                value={language}
-                onChange={(e) => setLanguage(e.target.value)}
-                placeholder="e.g., hungarian, german, french"
-                className="mt-1.5 w-full px-3 py-2.5 bg-cream border border-bark-200 rounded-[var(--radius-btn)] text-sm text-bark-800 placeholder:text-bark-300 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400"
-              />
-            </label>
+            <LanguageSelect value={language} onChange={setLanguage} />
 
             {/* Summary */}
             <div className="bg-cream rounded-xl p-4 space-y-2 text-sm">

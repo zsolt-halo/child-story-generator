@@ -163,10 +163,13 @@ export function Storyboard() {
       </div>
 
       {/* Cast editor */}
-      {showCastEditor && data.story.cast && (
+      {showCastEditor && data.story.cast && slug && (
         <div className="mb-6">
           <CastReviewPanel
+            slug={slug}
             initialCast={data.story.cast}
+            castRefUrls={data.cast_ref_urls ?? {}}
+            mainRefSheetUrl={data.reference_sheet_url ?? null}
             onApprove={handleCastSave}
             approving={savingCast}
           />

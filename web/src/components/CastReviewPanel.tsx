@@ -1,8 +1,13 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { FadeImage } from "./FadeImage";
+import { updateStory, regenerateCastRefSheet } from "../api/client";
 import type { CastMember } from "../api/types";
 
 interface CastReviewPanelProps {
+  slug: string;
   initialCast: CastMember[];
+  castRefUrls: Record<string, string>;
+  mainRefSheetUrl: string | null;
   onApprove: (cast: CastMember[]) => void;
   approving?: boolean;
 }
@@ -16,15 +21,52 @@ const emptyCastMember: CastMember = {
   appears_on_pages: [],
 };
 
-export function CastReviewPanel({ initialCast, onApprove, approving }: CastReviewPanelProps) {
+export function CastReviewPanel({
+  slug,
+  initialCast,
+  castRefUrls,
+  mainRefSheetUrl,
+  onApprove,
+  approving,
+}: CastReviewPanelProps) {
   const [cast, setCast] = useState<CastMember[]>([]);
+  const [regenerating, setRegenerating] = useState<Record<string, boolean>>({});
+  const [localRefUrls, setLocalRefUrls] = useState<Record<string, string>>({});
+  // Track which members had visual fields edited since their ref sheet was generated
+  const [dirtyVisuals, setDirtyVisuals] = useState<Record<string, boolean>>({});
+  const [expandedCards, setExpandedCards] = useState<Record<number, boolean>>({});
+  const eventSourcesRef = useRef<Map<string, EventSource>>(new Map());
 
   useEffect(() => {
     setCast(initialCast.map((c) => ({ ...c })));
+    // Expand all cards by default
+    const expanded: Record<number, boolean> = {};
+    initialCast.forEach((_, i) => { expanded[i] = true; });
+    setExpandedCards(expanded);
   }, [initialCast]);
+
+  // Clean up EventSources on unmount
+  useEffect(() => {
+    return () => {
+      for (const es of eventSourcesRef.current.values()) {
+        es.close();
+      }
+    };
+  }, []);
+
+  const toggleCard = (idx: number) => {
+    setExpandedCards((prev) => ({ ...prev, [idx]: !prev[idx] }));
+  };
 
   const updateMember = (idx: number, field: keyof CastMember, value: unknown) => {
     setCast((prev) => prev.map((m, i) => (i === idx ? { ...m, [field]: value } : m)));
+    // Track visual edits for dirty detection
+    if (field === "visual_description" || field === "visual_constants") {
+      const memberName = cast[idx]?.name;
+      if (memberName) {
+        setDirtyVisuals((prev) => ({ ...prev, [memberName]: true }));
+      }
+    }
   };
 
   const removeMember = (idx: number) => {
@@ -32,7 +74,9 @@ export function CastReviewPanel({ initialCast, onApprove, approving }: CastRevie
   };
 
   const addMember = () => {
+    const newIdx = cast.length;
     setCast((prev) => [...prev, { ...emptyCastMember }]);
+    setExpandedCards((prev) => ({ ...prev, [newIdx]: true }));
   };
 
   const parsePages = (value: string): number[] => {
@@ -42,125 +86,354 @@ export function CastReviewPanel({ initialCast, onApprove, approving }: CastRevie
       .filter((n) => !isNaN(n));
   };
 
+  // Get the effective ref URL for a member (local override > prop from store)
+  const getRefUrl = useCallback(
+    (memberName: string): string | null => {
+      return localRefUrls[memberName] || castRefUrls[memberName] || null;
+    },
+    [localRefUrls, castRefUrls],
+  );
+
+  const handleRegenerate = useCallback(
+    async (memberName: string) => {
+      if (regenerating[memberName]) return;
+      setRegenerating((prev) => ({ ...prev, [memberName]: true }));
+      try {
+        // Save current cast to backend first so regeneration uses latest descriptions
+        await updateStory(slug, { cast });
+        const { task_id } = await regenerateCastRefSheet(slug, memberName);
+
+        // Open one-off SSE to track this task
+        const source = new EventSource(`/api/pipeline/progress/${task_id}`);
+        eventSourcesRef.current.set(memberName, source);
+
+        source.onmessage = (e) => {
+          const event = JSON.parse(e.data);
+          if (event.type === "cast_ref_complete" && event.url) {
+            setLocalRefUrls((prev) => ({
+              ...prev,
+              [memberName]: event.url + `?t=${Date.now()}`,
+            }));
+            setDirtyVisuals((prev) => ({ ...prev, [memberName]: false }));
+          }
+          if (event.type === "task_complete" || event.type === "error") {
+            source.close();
+            eventSourcesRef.current.delete(memberName);
+            setRegenerating((prev) => ({ ...prev, [memberName]: false }));
+          }
+        };
+        source.onerror = () => {
+          source.close();
+          eventSourcesRef.current.delete(memberName);
+          setRegenerating((prev) => ({ ...prev, [memberName]: false }));
+        };
+      } catch {
+        setRegenerating((prev) => ({ ...prev, [memberName]: false }));
+      }
+    },
+    [regenerating, slug, cast],
+  );
+
+  const inputCls =
+    "mt-1 w-full px-3 py-2 bg-white border border-bark-200 rounded-[var(--radius-btn)] text-sm text-bark-800 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400";
+  const labelCls = "text-[11px] font-semibold text-bark-500 uppercase tracking-wide";
+
   return (
-    <div className="bg-white rounded-[var(--radius-card)] border border-bark-100 p-6 shadow-sm">
-      <div className="mb-5">
+    <div className="space-y-5">
+      {/* Header */}
+      <div className="bg-white rounded-[var(--radius-card)] border border-bark-100 p-6 shadow-sm">
         <h2 className="text-lg font-bold text-bark-800">Cast Review</h2>
         <p className="text-sm text-bark-400 mt-1">
-          Review and edit character descriptions before illustration begins. These descriptions
-          ensure visual consistency across all pages.
+          Review character descriptions and reference sheets before illustration begins.
+          Edit visuals and regenerate reference sheets to get the look just right.
         </p>
       </div>
 
-      <div className="space-y-4">
-        {cast.map((member, idx) => (
+      {/* Main character reference sheet — hero treatment */}
+      {mainRefSheetUrl && (
+        <div className="bg-white rounded-[var(--radius-card)] border border-bark-100 shadow-sm overflow-hidden">
+          <div className="bg-gradient-to-r from-amber-50 to-amber-100/50 px-6 py-3 border-b border-amber-200/40">
+            <span className="text-[11px] font-bold text-amber-600 uppercase tracking-wider">
+              Protagonist Reference Sheet
+            </span>
+          </div>
+          <div className="p-6">
+            <div className="flex gap-6 items-start">
+              <div className="w-56 shrink-0 rounded-xl overflow-hidden border border-amber-200/60 shadow-sm bg-white">
+                <FadeImage
+                  src={mainRefSheetUrl}
+                  thumbWidth={400}
+                  alt="Main character reference"
+                  className="w-full h-auto"
+                />
+              </div>
+              <div className="pt-2 flex-1 min-w-0">
+                <p className="text-sm text-bark-500 leading-relaxed">
+                  This multi-pose reference sheet guides all illustrations for the protagonist,
+                  ensuring consistent appearance across every page.
+                </p>
+                <p className="text-sm text-bark-500 leading-relaxed mt-2">
+                  The cast member sheets below do the same for secondary characters.
+                  Review each one and regenerate any that don't look right.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cast member cards — one card per character */}
+      {cast.map((member, idx) => {
+        const refUrl = getRefUrl(member.name);
+        const isRegenerating = regenerating[member.name] ?? false;
+        const isDirty = dirtyVisuals[member.name] ?? false;
+        const isExpanded = expandedCards[idx] ?? false;
+
+        return (
           <div
             key={idx}
-            className="bg-cream rounded-xl p-4 border border-bark-100 space-y-3"
+            className="bg-white rounded-[var(--radius-card)] border border-bark-100 shadow-sm overflow-hidden cast-card-enter"
+            style={{ animationDelay: `${idx * 0.06}s` }}
           >
-            <div className="flex items-start justify-between">
-              <div className="grid grid-cols-3 gap-3 flex-1 mr-3">
-                <label className="block">
-                  <span className="text-[10px] font-semibold text-bark-500 uppercase tracking-wide">
-                    Name
-                  </span>
-                  <input
-                    type="text"
-                    value={member.name}
-                    onChange={(e) => updateMember(idx, "name", e.target.value)}
-                    className="mt-1 w-full px-2.5 py-1.5 bg-white border border-bark-200 rounded-[var(--radius-btn)] text-sm text-bark-800 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400"
+            {/* Card header — always visible, acts as collapse toggle */}
+            <button
+              type="button"
+              onClick={() => toggleCard(idx)}
+              className="w-full flex items-center gap-4 px-5 py-4 text-left hover:bg-bark-50/50 transition-colors"
+            >
+              {/* Small thumbnail */}
+              <div className="w-12 h-12 shrink-0 rounded-lg overflow-hidden bg-bark-100 border border-bark-200/60">
+                {isRegenerating ? (
+                  <div className="w-full h-full flex items-center justify-center">
+                    <div className="w-5 h-5 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
+                  </div>
+                ) : refUrl ? (
+                  <FadeImage
+                    src={refUrl}
+                    thumbWidth={100}
+                    alt={member.name}
+                    className="w-full h-full object-cover"
                   />
-                </label>
-                <label className="block">
-                  <span className="text-[10px] font-semibold text-bark-500 uppercase tracking-wide">
-                    Role
-                  </span>
-                  <input
-                    type="text"
-                    value={member.role}
-                    onChange={(e) => updateMember(idx, "role", e.target.value)}
-                    className="mt-1 w-full px-2.5 py-1.5 bg-white border border-bark-200 rounded-[var(--radius-btn)] text-sm text-bark-800 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400"
-                  />
-                </label>
-                <label className="block">
-                  <span className="text-[10px] font-semibold text-bark-500 uppercase tracking-wide">
-                    Species
-                  </span>
-                  <input
-                    type="text"
-                    value={member.species}
-                    onChange={(e) => updateMember(idx, "species", e.target.value)}
-                    className="mt-1 w-full px-2.5 py-1.5 bg-white border border-bark-200 rounded-[var(--radius-btn)] text-sm text-bark-800 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400"
-                  />
-                </label>
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-bark-300">
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={1} stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0" />
+                    </svg>
+                  </div>
+                )}
               </div>
-              <button
-                onClick={() => removeMember(idx)}
-                className="p-1.5 text-bark-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors mt-4"
-                title="Remove cast member"
+
+              {/* Identity */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-bark-800 truncate">
+                    {member.name || "Unnamed character"}
+                  </span>
+                  {isDirty && !isRegenerating && refUrl && (
+                    <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-semibold">
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+                      </svg>
+                      Visuals changed
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 mt-0.5">
+                  {member.role && (
+                    <span className="text-xs text-bark-400">{member.role}</span>
+                  )}
+                  {member.role && member.species && (
+                    <span className="text-bark-300">&middot;</span>
+                  )}
+                  {member.species && (
+                    <span className="text-xs text-bark-400">{member.species}</span>
+                  )}
+                  {member.appears_on_pages.length > 0 && (
+                    <>
+                      <span className="text-bark-300">&middot;</span>
+                      <span className="text-xs text-bark-300">
+                        {member.appears_on_pages.length === 1
+                          ? "1 page"
+                          : `${member.appears_on_pages.length} pages`}
+                      </span>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Chevron */}
+              <svg
+                className={`w-5 h-5 text-bark-300 shrink-0 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`}
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth={2}
+                stroke="currentColor"
               >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                </svg>
-              </button>
-            </div>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+              </svg>
+            </button>
 
-            <label className="block">
-              <span className="text-[10px] font-semibold text-bark-500 uppercase tracking-wide">
-                Visual Description
-              </span>
-              <textarea
-                value={member.visual_description}
-                onChange={(e) => updateMember(idx, "visual_description", e.target.value)}
-                rows={3}
-                className="mt-1 w-full px-2.5 py-1.5 bg-white border border-bark-200 rounded-[var(--radius-btn)] text-sm text-bark-800 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400 resize-none"
-              />
-            </label>
+            {/* Expandable body */}
+            {isExpanded && (
+              <div className="border-t border-bark-100 cast-card-body-enter">
+                {/* Reference sheet image — large, prominent */}
+                <div className="p-5 bg-cream/50">
+                  <div className="flex gap-5 items-start">
+                    {/* Large ref sheet */}
+                    <div className="w-64 shrink-0">
+                      <div className="relative rounded-xl overflow-hidden bg-bark-100 border border-bark-200/60 shadow-sm">
+                        <div className="aspect-square">
+                          {isRegenerating ? (
+                            <div className="absolute inset-0 flex flex-col items-center justify-center bg-bark-50">
+                              <div className="w-10 h-10 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
+                              <span className="text-xs text-bark-400 mt-3 font-medium">Generating sheet...</span>
+                            </div>
+                          ) : refUrl ? (
+                            <FadeImage
+                              src={refUrl}
+                              thumbWidth={600}
+                              alt={`${member.name} reference sheet`}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="absolute inset-0 flex flex-col items-center justify-center text-bark-300">
+                              <svg className="w-10 h-10 mb-2" fill="none" viewBox="0 0 24 24" strokeWidth={1} stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" />
+                              </svg>
+                              <span className="text-[10px] font-medium">No reference sheet yet</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
 
-            <label className="block">
-              <span className="text-[10px] font-semibold text-bark-500 uppercase tracking-wide">
-                Visual Constants
-              </span>
-              <textarea
-                value={member.visual_constants}
-                onChange={(e) => updateMember(idx, "visual_constants", e.target.value)}
-                rows={2}
-                className="mt-1 w-full px-2.5 py-1.5 bg-white border border-bark-200 rounded-[var(--radius-btn)] text-sm text-bark-800 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400 resize-none"
-              />
-            </label>
+                      {/* Regenerate button — prominent, below image */}
+                      {member.name && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleRegenerate(member.name); }}
+                          disabled={isRegenerating || approving}
+                          className={`mt-3 w-full px-3 py-2.5 text-xs font-semibold rounded-[var(--radius-btn)] transition-all inline-flex items-center justify-center gap-1.5 ${
+                            isDirty && !isRegenerating
+                              ? "bg-amber-500 text-white hover:bg-amber-600 shadow-sm"
+                              : "text-bark-600 bg-white border border-bark-200 hover:border-amber-400 hover:text-amber-700"
+                          } disabled:opacity-40 disabled:cursor-not-allowed`}
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182" />
+                          </svg>
+                          {isRegenerating
+                            ? "Regenerating..."
+                            : isDirty
+                              ? "Regenerate (visuals changed)"
+                              : "Regenerate Sheet"}
+                        </button>
+                      )}
+                    </div>
 
-            <label className="block">
-              <span className="text-[10px] font-semibold text-bark-500 uppercase tracking-wide">
-                Appears on Pages (comma-separated)
-              </span>
-              <input
-                type="text"
-                value={member.appears_on_pages.join(", ")}
-                onChange={(e) => updateMember(idx, "appears_on_pages", parsePages(e.target.value))}
-                className="mt-1 w-full px-2.5 py-1.5 bg-white border border-bark-200 rounded-[var(--radius-btn)] text-sm text-bark-800 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400"
-              />
-            </label>
+                    {/* Editable fields — right of image */}
+                    <div className="flex-1 min-w-0 space-y-3">
+                      {/* Name / Role / Species — 2+1 layout instead of cramped 3-col */}
+                      <div className="flex items-start gap-3">
+                        <label className="block flex-1">
+                          <span className={labelCls}>Name</span>
+                          <input
+                            type="text"
+                            value={member.name}
+                            onChange={(e) => updateMember(idx, "name", e.target.value)}
+                            className={inputCls}
+                          />
+                        </label>
+                        <label className="block flex-1">
+                          <span className={labelCls}>Species</span>
+                          <input
+                            type="text"
+                            value={member.species}
+                            onChange={(e) => updateMember(idx, "species", e.target.value)}
+                            className={inputCls}
+                          />
+                        </label>
+                      </div>
+                      <div className="flex items-start gap-3">
+                        <label className="block flex-1">
+                          <span className={labelCls}>Role</span>
+                          <input
+                            type="text"
+                            value={member.role}
+                            onChange={(e) => updateMember(idx, "role", e.target.value)}
+                            className={inputCls}
+                          />
+                        </label>
+                        <label className="block flex-1">
+                          <span className={labelCls}>Pages (comma-separated)</span>
+                          <input
+                            type="text"
+                            value={member.appears_on_pages.join(", ")}
+                            onChange={(e) => updateMember(idx, "appears_on_pages", parsePages(e.target.value))}
+                            className={inputCls}
+                          />
+                        </label>
+                      </div>
+
+                      <label className="block">
+                        <span className={labelCls}>Visual Description</span>
+                        <textarea
+                          value={member.visual_description}
+                          onChange={(e) => updateMember(idx, "visual_description", e.target.value)}
+                          rows={3}
+                          className={`${inputCls} resize-none`}
+                        />
+                      </label>
+
+                      <label className="block">
+                        <span className={labelCls}>Visual Constants</span>
+                        <textarea
+                          value={member.visual_constants}
+                          onChange={(e) => updateMember(idx, "visual_constants", e.target.value)}
+                          rows={2}
+                          className={`${inputCls} resize-none`}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Card footer — remove button */}
+                <div className="flex justify-end px-5 py-3 border-t border-bark-100">
+                  <button
+                    onClick={() => removeMember(idx)}
+                    className="px-3 py-1.5 text-[11px] font-medium text-bark-400 hover:text-red-600 hover:bg-red-50 rounded-[var(--radius-btn)] transition-colors inline-flex items-center gap-1.5"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                    </svg>
+                    Remove Character
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
-        ))}
-      </div>
+        );
+      })}
 
-      <div className="flex items-center justify-between mt-5 pt-5 border-t border-bark-100">
-        <button
-          onClick={addMember}
-          className="px-4 py-2 text-xs font-medium text-bark-600 bg-bark-50 hover:bg-bark-100 rounded-[var(--radius-btn)] transition-colors inline-flex items-center gap-1.5"
-        >
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-          </svg>
-          Add Cast Member
-        </button>
-        <button
-          onClick={() => onApprove(cast)}
-          disabled={approving}
-          className="px-6 py-2.5 text-sm font-semibold text-white bg-sage-600 hover:bg-sage-700 disabled:opacity-60 disabled:cursor-not-allowed rounded-[var(--radius-btn)] transition-colors"
-        >
-          {approving ? "Continuing..." : "Approve & Continue"}
-        </button>
+      {/* Footer actions */}
+      <div className="bg-white rounded-[var(--radius-card)] border border-bark-100 shadow-sm p-5">
+        <div className="flex items-center justify-between">
+          <button
+            onClick={addMember}
+            className="px-4 py-2.5 text-xs font-medium text-bark-600 bg-bark-50 hover:bg-bark-100 rounded-[var(--radius-btn)] transition-colors inline-flex items-center gap-1.5"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            Add Cast Member
+          </button>
+          <button
+            onClick={() => onApprove(cast)}
+            disabled={approving || Object.values(regenerating).some(Boolean)}
+            className="px-6 py-2.5 text-sm font-semibold text-white bg-sage-600 hover:bg-sage-700 disabled:opacity-60 disabled:cursor-not-allowed rounded-[var(--radius-btn)] transition-colors"
+          >
+            {approving ? "Continuing..." : "Approve & Continue"}
+          </button>
+        </div>
       </div>
     </div>
   );
