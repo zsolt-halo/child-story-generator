@@ -19,6 +19,7 @@ class StoryListItem(BaseModel):
     title_translated: str | None = None
     parent_slug: str | None = None
     pipeline_status: str = "complete"  # story_review, cast_review, complete, draft
+    is_auto: bool = False
 
 
 class PipelineStartRequest(BaseModel):
@@ -28,6 +29,16 @@ class PipelineStartRequest(BaseModel):
     style: str = "digital"
     pages: int = 16
     language: str | None = None
+    text_model: str | None = None
+
+
+class AutoPipelineRequest(BaseModel):
+    character: str = "lana-llama"
+    narrator: str = "whimsical"
+    style: str = "digital"
+    pages: int = 16
+    language: str | None = None
+    text_model: str | None = None
 
 
 class TranslateRequest(BaseModel):
@@ -71,7 +82,42 @@ class BranchRequest(BaseModel):
     style: str = "digital"
     pages: int = 16
     language: str | None = None
+    text_model: str | None = None
     start_from: str = "full"  # "full" | "illustration"
+
+
+class PresetDetail(BaseModel):
+    id: str
+    name: str
+    character: str
+    narrator: str
+    style: str
+    pages: int
+    language: str | None = None
+    text_model: str = "gemini-2.5-pro"
+    is_default: bool = False
+
+
+class PresetCreateRequest(BaseModel):
+    name: str
+    character: str = "lana-llama"
+    narrator: str = "whimsical"
+    style: str = "digital"
+    pages: int = 16
+    language: str | None = None
+    text_model: str = "gemini-2.5-pro"
+    is_default: bool = False
+
+
+class PresetUpdateRequest(BaseModel):
+    name: str | None = None
+    character: str | None = None
+    narrator: str | None = None
+    style: str | None = None
+    pages: int | None = None
+    language: str | None = None
+    text_model: str | None = None
+    is_default: bool | None = None
 
 
 class TaskResponse(BaseModel):

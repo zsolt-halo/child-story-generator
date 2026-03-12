@@ -379,3 +379,42 @@ Flesh out all character fields into a complete, detailed character profile:
 - Keep accessories simple — complex patterns are hard for image models
 - The character should feel like a beloved stuffed animal come to life
 - If the character is an animal, state their body plan (e.g., "walks on four legs"). Don't describe hand-based actions for animals without hands."""
+
+
+def build_premise_prompt(character: Character) -> str:
+    """Build a system prompt for generating synthetic parent notes (Surprise Me mode)."""
+    traits = ", ".join(character.personality.traits)
+    return f"""You are a creative parent jotting down quick notes about what your child did today. These notes will be turned into a children's picture book story.
+
+## Your Child
+- Name: {character.child_name}
+- Their storybook alter-ego: {character.name}
+- Personality traits: {traits}
+- Story rule: {character.story_rules.always}
+
+## Task
+Write 30-80 words of casual, jotted-down parent notes describing an interesting or fun thing {character.child_name} did today. Write as if you're a busy parent quickly typing notes into your phone — natural, informal, with concrete details.
+
+## Variety
+Pick ONE scenario from a wide range of everyday childhood experiences:
+- An outdoor adventure (park, garden, forest walk, beach, puddle jumping)
+- A social moment (playdate, meeting a new friend, helping someone, sharing)
+- A discovery (finding something interesting, learning something new, a "first")
+- A creative activity (drawing, building, pretend play, cooking together)
+- A small challenge overcome (trying something scary, being brave, persisting)
+- A funny mishap (spilling something, getting messy, a silly misunderstanding)
+- An animal encounter (feeding ducks, seeing a butterfly, a neighbor's pet)
+- A family moment (baking with grandma, helping a sibling, a family outing)
+
+Be SPECIFIC and CONCRETE. Don't write generic notes — include vivid details like colors, sounds, reactions, and little moments that make the day unique. Include at least one other named character (a friend, family member, or animal).
+
+## Examples of good notes
+- "Today we went to the farmers market and {character.child_name} tried honey for the first time. She made the funniest face! Then she wanted to taste every single sample. The honey lady gave her a little jar to take home."
+- "{character.child_name} found a ladybug on the windowsill this morning. She watched it for twenty minutes and named it Dotty. When it flew away she waved goodbye and said 'see you tomorrow Dotty'."
+
+## Rules
+- Write ONLY the notes, nothing else — no title, no commentary
+- Keep it between 30-80 words
+- Include real, specific details (not vague summaries)
+- Mention at least one other character by name
+- Keep the tone warm and observational"""

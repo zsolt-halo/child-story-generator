@@ -56,8 +56,23 @@ def generate_text(
             ),
         )
         elapsed = _time.monotonic() - t0
-        span.set_attribute("gemini.response_len", len(response.text))
-        logger.debug("generate_text: response_len=%d", len(response.text))
+        text = response.text or ""
+        if not text:
+            # Log diagnostics for debugging empty responses
+            finish = None
+            if response.candidates:
+                c = response.candidates[0]
+                finish = getattr(c, "finish_reason", None)
+                parts = getattr(getattr(c, "content", None), "parts", []) or []
+                logger.warning(
+                    "generate_text: empty response (model=%s, finish=%s, parts=%d, thought_parts=%d)",
+                    config.text_model, finish, len(parts),
+                    sum(1 for p in parts if getattr(p, "thought", False)),
+                )
+            else:
+                logger.warning("generate_text: no candidates (model=%s)", config.text_model)
+        span.set_attribute("gemini.response_len", len(text))
+        logger.debug("generate_text: response_len=%d", len(text))
         if hasattr(response, "usage_metadata") and response.usage_metadata:
             u = response.usage_metadata
             logger.debug("Token usage: prompt=%s candidates=%s total=%s",
@@ -65,7 +80,7 @@ def generate_text(
                           getattr(u, "candidates_token_count", "?"),
                           getattr(u, "total_token_count", "?"))
         _record_gemini_metrics(config.text_model, "text", elapsed)
-        return response.text
+        return text
 
 
 def generate_structured(

@@ -63,6 +63,11 @@ export function StoryCard({ story, onDelete }: { story: StoryListItem; onDelete?
               PDF
             </span>
           )}
+          {story.is_auto && (
+            <span className="px-2 py-0.5 bg-bark-600/70 text-cream text-[10px] font-semibold rounded-full backdrop-blur-sm">
+              Surprise
+            </span>
+          )}
         </div>
       </div>
 

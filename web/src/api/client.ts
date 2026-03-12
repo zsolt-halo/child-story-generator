@@ -5,6 +5,7 @@ import type {
   StyleInfo,
   NarratorInfo,
   PipelineStartRequest,
+  AutoPipelineRequest,
   TaskResponse,
   TaskStatus,
   SanityCheckResult,
@@ -13,6 +14,9 @@ import type {
   CharacterCreateRequest,
   CharacterPolishRequest,
   CharacterPolishResponse,
+  PresetDetail,
+  PresetCreateRequest,
+  PresetUpdateRequest,
 } from "./types";
 
 const BASE = "/api";
@@ -48,6 +52,8 @@ export const startPipeline = (req: PipelineStartRequest) =>
   request<TaskResponse>("/pipeline/start", { method: "POST", body: JSON.stringify(req) });
 export const startStoryOnly = (req: PipelineStartRequest) =>
   request<TaskResponse>("/pipeline/story", { method: "POST", body: JSON.stringify(req) });
+export const startAutoGenerate = (req: AutoPipelineRequest) =>
+  request<TaskResponse>("/pipeline/auto", { method: "POST", body: JSON.stringify(req) });
 export const startTranslate = (slug: string, language: string) =>
   request<TaskResponse>(`/pipeline/translate/${slug}`, {
     method: "POST",
@@ -103,3 +109,12 @@ export const duplicateTemplate = (slug: string) =>
   request<CharacterDetail>(`/characters/duplicate-template/${slug}`, { method: "POST" });
 export const polishCharacter = (data: CharacterPolishRequest) =>
   request<CharacterPolishResponse>("/characters/polish", { method: "POST", body: JSON.stringify(data) });
+
+// Presets
+export const listPresets = () => request<PresetDetail[]>("/presets/");
+export const createPreset = (data: PresetCreateRequest) =>
+  request<PresetDetail>("/presets/", { method: "POST", body: JSON.stringify(data) });
+export const updatePreset = (id: string, data: PresetUpdateRequest) =>
+  request<PresetDetail>(`/presets/${id}`, { method: "PUT", body: JSON.stringify(data) });
+export const deletePreset = (id: string) =>
+  request(`/presets/${id}`, { method: "DELETE" });

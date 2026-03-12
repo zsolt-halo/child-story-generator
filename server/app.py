@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from server.routers import stories, pipeline, config, sanity, characters
+from server.routers import stories, pipeline, config, sanity, characters, presets
 
 load_dotenv()
 
@@ -68,6 +68,7 @@ app.include_router(pipeline.router)
 app.include_router(config.router)
 app.include_router(sanity.router)
 app.include_router(characters.router)
+app.include_router(presets.router)
 
 
 @app.get("/api/health")

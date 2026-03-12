@@ -9,6 +9,7 @@ export interface StoryListItem {
   title_translated: string | null;
   parent_slug: string | null;
   pipeline_status: "story_review" | "cast_review" | "complete" | "draft";
+  is_auto?: boolean;
 }
 
 export interface Keyframe {
@@ -96,6 +97,40 @@ export interface NarratorInfo {
   example: string;
 }
 
+export interface PresetDetail {
+  id: string;
+  name: string;
+  character: string;
+  narrator: string;
+  style: string;
+  pages: number;
+  language: string | null;
+  text_model: string;
+  is_default: boolean;
+}
+
+export interface PresetCreateRequest {
+  name: string;
+  character: string;
+  narrator: string;
+  style: string;
+  pages: number;
+  language?: string;
+  text_model?: string;
+  is_default?: boolean;
+}
+
+export interface PresetUpdateRequest {
+  name?: string;
+  character?: string;
+  narrator?: string;
+  style?: string;
+  pages?: number;
+  language?: string | null;
+  text_model?: string;
+  is_default?: boolean;
+}
+
 export interface PipelineStartRequest {
   notes: string;
   character: string;
@@ -103,6 +138,16 @@ export interface PipelineStartRequest {
   style: string;
   pages: number;
   language?: string;
+  text_model?: string;
+}
+
+export interface AutoPipelineRequest {
+  character: string;
+  narrator: string;
+  style: string;
+  pages: number;
+  language?: string;
+  text_model?: string;
 }
 
 export interface TaskResponse {

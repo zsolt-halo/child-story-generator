@@ -1,7 +1,7 @@
 import logging
 
 from src.brain.client import generate_text
-from src.brain.prompts import build_storyteller_system_prompt
+from src.brain.prompts import build_storyteller_system_prompt, build_premise_prompt
 from src.models import BookConfig, Character
 
 logger = logging.getLogger(__name__)
@@ -31,3 +31,24 @@ def generate_story(notes: str, character: Character, config: BookConfig, style_d
 
     logger.info("Story generated: '%s' (%d words)", title, len(prose.split()))
     return title, prose
+
+
+def generate_premise(character: Character, config: BookConfig) -> str:
+    """Generate synthetic parent notes for the Surprise Me mode."""
+    logger.info("Generating premise for %s (%d-page)", character.child_name, config.pages)
+    system_prompt = build_premise_prompt(character)
+    user_prompt = (
+        f"Write today's notes about {character.child_name} "
+        f"for a {config.pages}-page picture book story."
+    )
+    # max_tokens must be high enough for Gemini 2.5's thinking budget + output
+    for attempt in range(2):
+        notes = generate_text(config, system_prompt, user_prompt, max_tokens=4096)
+        if notes.strip():
+            break
+        if attempt == 0:
+            logger.warning("Premise was empty, retrying...")
+    if not notes.strip():
+        raise RuntimeError("Gemini returned empty premise after 2 attempts")
+    logger.info("Premise generated: %d words", len(notes.split()))
+    return notes.strip()

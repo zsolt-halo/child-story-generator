@@ -144,6 +144,32 @@ class CharacterRow(Base):
     )
 
 
+class PresetRow(Base):
+    """Saved configuration presets for auto-generation."""
+    __tablename__ = "presets"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    character: Mapped[str] = mapped_column(String(200), default="lana-llama")
+    narrator: Mapped[str] = mapped_column(String(40), default="whimsical")
+    style: Mapped[str] = mapped_column(String(40), default="digital")
+    pages: Mapped[int] = mapped_column(Integer, default=16)
+    language: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    text_model: Mapped[str] = mapped_column(String(60), default="gemini-2.5-pro")
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
 class PhaseTimingRow(Base):
     """Historical pipeline phase durations for ETA estimation."""
     __tablename__ = "phase_timings"

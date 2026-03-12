@@ -254,13 +254,14 @@ async def run_full_pipeline(
     style: str,
     pages: int,
     language: str | None,
+    text_model: str | None = None,
 ) -> dict:
     """Run the full pipeline: story → keyframes → translation → illustrations → backdrops → PDF."""
     logger.info("run_full_pipeline: task=%s character=%s style=%s pages=%d", task_id, character, style, pages)
     t0 = _time.monotonic()
     span = trace.get_current_span()
     span.set_attribute("pipeline.type", "full")
-    config = build_config(character=character, narrator=narrator, style=style, pages=pages)
+    config = build_config(character=character, narrator=narrator, style=style, pages=pages, text_model=text_model)
     char = await async_resolve_character(config.character)
     style_data = load_style(config.style)
     style_desc = style_data["description"]
@@ -369,6 +370,135 @@ async def run_full_pipeline(
     return {"slug": slug, "title": story.title}
 
 
+async def run_auto_pipeline(
+    task_id: str,
+    character: str,
+    narrator: str,
+    style: str,
+    pages: int,
+    language: str | None,
+    text_model: str | None = None,
+) -> dict:
+    """Surprise Me: generate a premise then run the full pipeline end-to-end."""
+    logger.info("run_auto_pipeline: task=%s character=%s style=%s pages=%d", task_id, character, style, pages)
+    t0 = _time.monotonic()
+    span = trace.get_current_span()
+    span.set_attribute("pipeline.type", "auto")
+    config = build_config(character=character, narrator=narrator, style=style, pages=pages, text_model=text_model)
+    char = await async_resolve_character(config.character)
+    style_data = load_style(config.style)
+    style_desc = style_data["description"]
+    style_anchor = style_data.get("anchor", style_desc)
+
+    # Phase 0: Premise — generate synthetic parent notes
+    from src.brain.storyteller import generate_premise
+    async with _phase(task_id, "premise", "Imagining a story idea...") as r:
+        notes = await asyncio.to_thread(generate_premise, char, config)
+        r.update(notes=notes)
+
+    # Phase 1: Story
+    from src.brain.storyteller import generate_story
+    async with _phase(task_id, "story", "Generating story...") as r:
+        title, prose = await asyncio.to_thread(generate_story, notes, char, config, style_desc)
+        r.update(title=title, word_count=len(prose.split()))
+
+    # Phase 2: Keyframes
+    from src.brain.keyframer import generate_keyframes
+    async with _phase(task_id, "keyframes", "Breaking story into pages...") as r:
+        story = await asyncio.to_thread(generate_keyframes, title, prose, char, config, style_desc)
+        r.update(page_count=len(story.keyframes))
+
+    # Save checkpoint with metadata
+    output_dir = Path("stories") / slugify(story.title)
+    metadata = {
+        "notes": f"[auto] {notes}",
+        "config": {
+            "character": character,
+            "narrator": narrator,
+            "style": style,
+            "pages": pages,
+            "language": language,
+        },
+        "parent_slug": None,
+        "created_at": datetime.now().isoformat(),
+    }
+    slug = output_dir.name
+    await _save(slug, story, metadata=metadata)
+
+    # Phase 2.5: Cast Extraction
+    from src.brain.cast_extractor import extract_cast
+    story.cast = []
+    async with _phase(task_id, "cast", "Analyzing character cast for consistency...") as r:
+        story = await asyncio.to_thread(extract_cast, story, char, config)
+        await _save(slug, story)
+        r.update(cast_count=len(story.cast), members=[m.model_dump() for m in story.cast])
+
+    # Phase 2b: Translation
+    if language:
+        from src.brain.translator import translate_story
+        async with _phase(task_id, "translation", f"Translating to {language}...") as r:
+            story = await asyncio.to_thread(translate_story, story, language, config)
+            await _save(slug, story)
+            r.update(translated_title=story.title_translated)
+
+    # Phase 2c: Reference Sheet
+    from src.artist.generator import (
+        generate_reference_sheet, load_reference_sheet,
+        generate_cast_reference_sheet, load_cast_reference_sheets,
+    )
+    images_dir = output_dir / "images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    async with _phase(task_id, "reference_sheet", "Generating character reference sheet...") as r:
+        ref_path = await asyncio.to_thread(generate_reference_sheet, char, style_anchor, config, images_dir)
+        r.update(generated=ref_path is not None, url=f"/api/stories/{slug}/images/reference_sheet.png" if ref_path else None)
+
+    # Phase 2d: Cast reference sheets
+    if story.cast:
+        cast_count = len(story.cast)
+        async with _phase(task_id, "cast_reference_sheets", f"Generating {cast_count} cast reference sheets...", total=cast_count) as r:
+            for i, member in enumerate(story.cast):
+                await asyncio.to_thread(
+                    generate_cast_reference_sheet, member, style_anchor, config, images_dir,
+                )
+                name_slug = slugify(member.name)
+                await task_manager.broadcast(task_id, {
+                    "type": "cast_ref_complete",
+                    "name": member.name,
+                    "url": f"/api/stories/{slug}/images/ref_{name_slug}.png",
+                    "progress": i + 1,
+                    "total": cast_count,
+                })
+                if i < cast_count - 1:
+                    await asyncio.sleep(5.0)
+            r.update(count=cast_count)
+
+    ref_bytes = load_reference_sheet(images_dir)
+    cast_ref_map = load_cast_reference_sheets(images_dir, story.cast) if story.cast else None
+
+    # Phase 3: Illustrations
+    async with _phase(task_id, "illustration", "Generating illustrations...", total=len(story.keyframes)):
+        image_paths = await _illustrate_keyframes(
+            task_id, slug, story, config, char, style_anchor, images_dir, ref_bytes, cast_ref_map,
+        )
+    await _save(slug, story, [str(p) for p in image_paths])
+
+    # Phase 3b: Backdrops
+    from src.artist.generator import generate_backdrops
+    backdrops_dir = output_dir / "backdrops"
+    async with _phase(task_id, "backdrops", "Generating backdrops...") as r:
+        backdrop_paths = await asyncio.to_thread(generate_backdrops, config, style_anchor, backdrops_dir)
+        r.update(count=len(backdrop_paths))
+
+    # Phase 4: PDF
+    from src.publisher.layout import render_book_pdf
+    async with _phase(task_id, "pdf", "Rendering PDF..."):
+        pdf_path = output_dir / "book.pdf"
+        await asyncio.to_thread(render_book_pdf, story, image_paths, pdf_path, backdrop_paths)
+
+    logger.info("Auto pipeline completed in %.1fs: slug=%s", _time.monotonic() - t0, slug)
+    return {"slug": slug, "title": story.title}
+
+
 async def run_story_only(
     task_id: str,
     notes: str,
@@ -379,12 +509,13 @@ async def run_story_only(
     output_slug: str | None = None,
     language: str | None = None,
     parent_slug: str | None = None,
+    text_model: str | None = None,
 ) -> dict:
     """Run Phase 1+2 only (story + keyframes)."""
     logger.info("run_story_only: task=%s character=%s style=%s", task_id, character, style)
     span = trace.get_current_span()
     span.set_attribute("pipeline.type", "story_only")
-    config = build_config(character=character, narrator=narrator, style=style, pages=pages)
+    config = build_config(character=character, narrator=narrator, style=style, pages=pages, text_model=text_model)
     char = await async_resolve_character(config.character)
     style_data = load_style(config.style)
     style_desc = style_data["description"]

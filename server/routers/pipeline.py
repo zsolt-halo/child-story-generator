@@ -4,7 +4,7 @@ import json
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from server.schemas import PipelineStartRequest, TranslateRequest, TaskResponse, TaskStatusResponse, BranchRequest, CoverSelectionRequest, RegenerateRefSheetRequest
+from server.schemas import PipelineStartRequest, AutoPipelineRequest, TranslateRequest, TaskResponse, TaskStatusResponse, BranchRequest, CoverSelectionRequest, RegenerateRefSheetRequest
 from server.services.task_manager import task_manager
 from server.services import pipeline_service
 
@@ -21,6 +21,7 @@ async def start_full_pipeline(req: PipelineStartRequest):
         style=req.style,
         pages=req.pages,
         language=req.language,
+        text_model=req.text_model,
         exclusive=True,
     )
     return TaskResponse(task_id=task_id)
@@ -36,6 +37,23 @@ async def start_story_only(req: PipelineStartRequest):
         style=req.style,
         pages=req.pages,
         language=req.language,
+        text_model=req.text_model,
+        exclusive=True,
+    )
+    return TaskResponse(task_id=task_id)
+
+
+@router.post("/auto", response_model=TaskResponse)
+async def start_auto_pipeline(req: AutoPipelineRequest):
+    """Surprise Me: generate a random story concept and run the full pipeline."""
+    task_id = task_manager.create_task(
+        pipeline_service.run_auto_pipeline,
+        character=req.character,
+        narrator=req.narrator,
+        style=req.style,
+        pages=req.pages,
+        language=req.language,
+        text_model=req.text_model,
         exclusive=True,
     )
     return TaskResponse(task_id=task_id)
@@ -159,6 +177,7 @@ async def start_branch(slug: str, req: BranchRequest):
             output_slug=new_slug,
             language=req.language,
             parent_slug=slug,
+            text_model=req.text_model,
             exclusive=True,
         )
 
