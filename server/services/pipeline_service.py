@@ -229,6 +229,7 @@ async def _illustrate_keyframes(
             generate_single_image, client, prompt, config.image_model, raw_path,
             reference_image=ref_bytes,
             additional_references=additional_refs if additional_refs else None,
+            multimodal_model=config.image_model_multimodal,
         )
         await asyncio.to_thread(upscale_for_print, raw_path, final_path)
 
@@ -668,6 +669,7 @@ async def run_illustrate(task_id: str, slug: str, page_number: int | None = None
                     generate_single_image, client, prompt, ctx.config.image_model, raw_path,
                     reference_image=ref_bytes,
                     additional_references=additional_refs if additional_refs else None,
+                    multimodal_model=ctx.config.image_model_multimodal,
                 )
                 await asyncio.to_thread(upscale_for_print, raw_path, final_path)
 
