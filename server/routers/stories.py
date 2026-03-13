@@ -44,10 +44,10 @@ async def get_story_detail(slug: str):
         if img.exists():
             image_urls[kf.page_number] = f"/api/stories/{slug}/images/{kf.image_prefix}.png"
 
-    from src.utils.io import discover_backdrops
+    from src.utils.io import get_static_backdrops
     backdrop_urls = [
-        f"/api/stories/{slug}/images/../backdrops/{p.name}"
-        for p in discover_backdrops(story_dir)
+        f"/api/config/backdrops/{p.name}"
+        for p in get_static_backdrops(slug)
     ]
 
     # Check for reference sheet
@@ -70,12 +70,22 @@ async def get_story_detail(slug: str):
         if ref_path.exists():
             cast_ref_urls[member.name] = f"/api/stories/{slug}/images/ref_{name_slug}.png"
 
+    # Check for video files
+    videos_dir = story_dir / "videos"
+    video_urls: dict[int, str] = {}
+    if videos_dir.exists():
+        for kf in story.keyframes:
+            vid = videos_dir / f"{kf.image_prefix}.mp4"
+            if vid.exists():
+                video_urls[kf.page_number] = f"/api/stories/{slug}/videos/{kf.image_prefix}.mp4"
+
     metadata = await get_metadata(slug)
 
     return {
         "slug": slug,
         "story": story.model_dump(),
         "image_urls": image_urls,
+        "video_urls": video_urls,
         "backdrop_urls": backdrop_urls,
         "cover_variation_urls": cover_variation_urls,
         "reference_sheet_url": reference_sheet_url,
@@ -83,6 +93,7 @@ async def get_story_detail(slug: str):
         "has_pdf": (story_dir / "book.pdf").exists(),
         "has_screen_pdf": (story_dir / "book-screen.pdf").exists(),
         "has_spread_pdf": (story_dir / "book-spreads.pdf").exists(),
+        "has_video": len(video_urls) > 0,
         "metadata": metadata,
     }
 
@@ -145,6 +156,19 @@ async def serve_image(slug: str, filename: str, w: int | None = Query(None)):
         await asyncio.to_thread(_generate_thumbnail, source, thumb_path, width)
 
     return FileResponse(thumb_path, media_type="image/jpeg")
+
+
+@router.get("/{slug}/videos/{filename}")
+async def serve_video(slug: str, filename: str):
+    try:
+        story_dir = get_story_dir(slug)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Story not found")
+
+    file_path = story_dir / "videos" / filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Video not found")
+    return FileResponse(file_path, media_type="video/mp4")
 
 
 @router.get("/{slug}/backdrops/{filename}")

@@ -1,7 +1,11 @@
+import hashlib
 import json
+import random
 from pathlib import Path
 
 from src.models import Story
+
+STATIC_BACKDROPS_DIR = Path(__file__).resolve().parent.parent.parent / "static" / "backdrops"
 
 CHECKPOINT_FILE = "story.json"
 
@@ -20,6 +24,17 @@ def discover_backdrops(story_dir: Path) -> list[Path]:
     if not backdrops_dir.exists():
         return []
     return [p for p in sorted(backdrops_dir.glob("backdrop_*.png")) if "_raw" not in p.name]
+
+
+def get_static_backdrops(slug: str) -> list[Path]:
+    """Return the static backdrop pool shuffled deterministically by story slug."""
+    pool = sorted(STATIC_BACKDROPS_DIR.glob("backdrop_*.png"))
+    if not pool:
+        return []
+    seed = int(hashlib.md5(slug.encode()).hexdigest(), 16)
+    rng = random.Random(seed)
+    rng.shuffle(pool)
+    return pool
 
 
 def load_checkpoint(output_dir: Path) -> tuple[Story, list[Path]]:

@@ -29,6 +29,8 @@ services:
       OTEL_EXPORTER: "${OTEL_EXPORTER:-none}"
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otel-lgtm:4318/v1/traces"
       OTEL_SERVICE_NAME: "starlight-backend"
+      ANIMATION_MODE: "${ANIMATION_MODE:-remote}"
+      WORKER_AUTH_TOKEN: "${WORKER_AUTH_TOKEN:-dev-token}"
     volumes:
       - stories-data:/app/stories
     depends_on:
@@ -51,6 +53,29 @@ services:
       - ./grafana/dashboards/starlight-overview.json:/otel-lgtm/starlight-overview.json:ro
       - ./grafana/provisioning/dashboards/default.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/starlight.yaml:ro
     profiles: [observability]
+
+  animation-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    environment:
+      BACKEND_URL: http://backend:8000
+      WORKER_TOKEN: "${WORKER_AUTH_TOKEN:-dev-token}"
+      WAN_REPO: /wan
+      WAN_MODEL_DIR: /models/Wan2.2-TI2V-5B
+    volumes:
+      - C:/Users/netzs/codes/Wan2.2:/wan:ro
+      - C:/Users/netzs/codes/Wan2.2/Wan2.2-TI2V-5B:/models/Wan2.2-TI2V-5B:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    depends_on:
+      - backend
+    profiles: [animation]
 
 volumes:
   postgres-data:

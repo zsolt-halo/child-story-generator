@@ -7,6 +7,7 @@ interface StoryReviewPanelProps {
   slug: string;
   onApprove: () => void;
   approving?: boolean;
+  hideApproveButton?: boolean;
 }
 
 /* ─── Mood → color mapping ─── */
@@ -93,7 +94,7 @@ function buildPathFromPoints(points: { x: number; y: number }[]): string {
 
 /* ─── Component ─── */
 
-export function StoryReviewPanel({ slug, onApprove, approving }: StoryReviewPanelProps) {
+export function StoryReviewPanel({ slug, onApprove, approving, hideApproveButton }: StoryReviewPanelProps) {
   const { data, isLoading } = useQuery({
     queryKey: ["story", slug],
     queryFn: () => getStory(slug),
@@ -404,7 +405,7 @@ export function StoryReviewPanel({ slug, onApprove, approving }: StoryReviewPane
       </div>
 
       {/* Approve section */}
-      <div className="mt-8 pt-6 border-t border-bark-100 text-center">
+      {!hideApproveButton && <div className="mt-8 pt-6 border-t border-bark-100 text-center">
         <p className="text-xs text-bark-400 mb-4">
           Review your story flow. You can regenerate later if needed.
         </p>
@@ -434,7 +435,7 @@ export function StoryReviewPanel({ slug, onApprove, approving }: StoryReviewPane
             </>
           )}
         </button>
-      </div>
+      </div>}
     </div>
   );
 }

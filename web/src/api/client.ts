@@ -63,8 +63,6 @@ export const startIllustrate = (slug: string) =>
   request<TaskResponse>(`/pipeline/illustrate/${slug}`, { method: "POST" });
 export const startIllustratePage = (slug: string, page: number) =>
   request<TaskResponse>(`/pipeline/illustrate/${slug}/${page}`, { method: "POST" });
-export const startBackdrops = (slug: string) =>
-  request<TaskResponse>(`/pipeline/backdrops/${slug}`, { method: "POST" });
 export const continuePipeline = (slug: string, castEdited = false) =>
   request<TaskResponse>(`/pipeline/continue/${slug}?cast_edited=${castEdited}`, { method: "POST" });
 export const selectCoverAndContinue = (slug: string, choice: number) =>
@@ -74,6 +72,11 @@ export const selectCoverAndContinue = (slug: string, choice: number) =>
   });
 export const startCastExtraction = (slug: string) =>
   request<TaskResponse>(`/pipeline/cast/${slug}`, { method: "POST" });
+export const approvePipeline = (slug: string, choice: number, castEdited = false) =>
+  request<TaskResponse>(`/pipeline/approve/${slug}`, {
+    method: "POST",
+    body: JSON.stringify({ choice, cast_edited: castEdited }),
+  });
 export const regenerateCastRefSheet = (slug: string, memberName: string) =>
   request<TaskResponse>(`/pipeline/regenerate-ref-sheet/${slug}`, {
     method: "POST",
@@ -81,6 +84,10 @@ export const regenerateCastRefSheet = (slug: string, memberName: string) =>
   });
 export const branchStory = (slug: string, req: BranchRequest) =>
   request<TaskResponse>(`/pipeline/branch/${slug}`, { method: "POST", body: JSON.stringify(req) });
+export const startAnimate = (slug: string) =>
+  request<TaskResponse>(`/pipeline/animate/${slug}`, { method: "POST" });
+export const getWorkerStatus = () =>
+  request<{ available: boolean; last_seen: string | null; queue: unknown }>("/worker/status");
 export const startPdf = (slug: string) =>
   request<TaskResponse>(`/pipeline/pdf/${slug}`, { method: "POST" });
 export const getTaskStatus = (taskId: string) =>
@@ -109,6 +116,8 @@ export const duplicateTemplate = (slug: string) =>
   request<CharacterDetail>(`/characters/duplicate-template/${slug}`, { method: "POST" });
 export const polishCharacter = (data: CharacterPolishRequest) =>
   request<CharacterPolishResponse>("/characters/polish", { method: "POST", body: JSON.stringify(data) });
+export const generateCharacterRefSheet = (identifier: string) =>
+  request<TaskResponse>(`/characters/${identifier}/generate-reference-sheet`, { method: "POST" });
 
 // Presets
 export const listPresets = () => request<PresetDetail[]>("/presets/");

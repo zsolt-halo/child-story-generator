@@ -45,6 +45,7 @@ COPY src/ ./src/
 COPY server/ ./server/
 COPY main.py ./
 COPY configs/ ./configs/
+COPY static/ ./static/
 COPY alembic.ini ./
 COPY alembic/ ./alembic/
 COPY scripts/ ./scripts/

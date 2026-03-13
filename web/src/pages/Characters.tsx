@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   listAllCharacters,
@@ -6,9 +6,11 @@ import {
   updateCharacter,
   deleteCharacter,
   duplicateTemplate,
+  generateCharacterRefSheet,
 } from "../api/client";
-import type { CharacterDetail } from "../api/types";
+import type { CharacterDetail, SSEEvent } from "../api/types";
 import { CharacterEditor } from "../components/CharacterEditor";
+import { useSSE } from "../hooks/useSSE";
 
 type PanelMode =
   | { kind: "empty" }
@@ -211,6 +213,7 @@ export function Characters() {
 
         {panel.kind === "view" && selectedChar && (
           <DetailPanel
+            key={selectedChar.id ?? selectedChar.slug}
             character={selectedChar}
             onEdit={() => {
               if (selectedChar.id) setPanel({ kind: "edit", id: selectedChar.id });
@@ -230,6 +233,7 @@ export function Characters() {
                   : "Failed to delete"
                 : null
             }
+            onRefSheetGenerated={invalidate}
           />
         )}
 
@@ -316,11 +320,19 @@ function SidebarItem({
       onClick={onClick}
       className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${
         selected
-          ? "bg-amber-50 border-r-2 border-r-amber-500"
+          ? "bg-sage-50 border-r-2 border-r-sage-500"
           : "hover:bg-bark-50"
       }`}
     >
-      <PaletteAvatar palette={character.visual.color_palette} size={36} className="rounded-full" />
+      {character.reference_sheet_url ? (
+        <img
+          src={`${character.reference_sheet_url}?w=200`}
+          alt={character.name}
+          className="w-9 h-9 rounded-full object-cover shrink-0"
+        />
+      ) : (
+        <PaletteAvatar palette={character.visual.color_palette} size={36} className="rounded-full" />
+      )}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           <span
@@ -354,6 +366,7 @@ function DetailPanel({
   setConfirmDelete,
   isDeleting,
   deleteError,
+  onRefSheetGenerated,
 }: {
   character: CharacterDetail;
   onEdit: () => void;
@@ -364,11 +377,110 @@ function DetailPanel({
   setConfirmDelete: (v: boolean) => void;
   isDeleting: boolean;
   deleteError: string | null;
+  onRefSheetGenerated: () => void;
 }) {
   const palette = character.visual.color_palette;
+  const [generating, setGenerating] = useState(false);
+  const [genTaskId, setGenTaskId] = useState<string | null>(null);
+  const [genMessage, setGenMessage] = useState<string | null>(null);
+  const [localRefUrl, setLocalRefUrl] = useState<string | null>(null);
+
+  const identifier = character.is_template ? character.slug : character.id!;
+  const refSheetUrl = localRefUrl ?? character.reference_sheet_url;
+
+  const handleSSEEvent = useCallback((event: SSEEvent) => {
+    if (event.type === "phase_start" && event.message) {
+      setGenMessage(event.message);
+    }
+    if (event.type === "reference_sheet_complete") {
+      setGenerating(false);
+      setGenTaskId(null);
+      setGenMessage(null);
+      setLocalRefUrl(event.url ?? null);
+      onRefSheetGenerated();
+    }
+    if (event.type === "task_complete") {
+      setGenerating(false);
+      setGenTaskId(null);
+      setGenMessage(null);
+    }
+    if (event.type === "error") {
+      setGenerating(false);
+      setGenTaskId(null);
+      setGenMessage(event.message ?? "Generation failed");
+    }
+  }, [onRefSheetGenerated]);
+
+  useSSE(genTaskId, "/api/pipeline/progress", handleSSEEvent);
+
+  const handleGenerate = async () => {
+    setGenerating(true);
+    setGenMessage("Starting...");
+    setLocalRefUrl(null);
+    try {
+      const res = await generateCharacterRefSheet(identifier);
+      setGenTaskId(res.task_id);
+    } catch {
+      setGenerating(false);
+      setGenMessage("Failed to start generation");
+    }
+  };
 
   return (
     <div className="max-w-2xl mx-auto px-6 py-8">
+      {/* Reference sheet hero */}
+      {refSheetUrl ? (
+        <div className="mb-6 rounded-[var(--radius-card)] border border-bark-100 overflow-hidden bg-white shadow-sm">
+          <img
+            src={`${refSheetUrl}?w=800`}
+            alt={`${character.name} reference sheet`}
+            className="w-full object-cover"
+          />
+          <div className="px-4 py-2.5 flex items-center justify-between border-t border-bark-100">
+            <span className="text-[10px] font-semibold text-bark-400 uppercase tracking-wider">Reference Sheet</span>
+            <button
+              onClick={handleGenerate}
+              disabled={generating}
+              className="text-[11px] font-medium text-sage-600 hover:text-sage-700 disabled:opacity-50 transition-colors"
+            >
+              {generating ? "Regenerating..." : "Regenerate"}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="mb-6 rounded-[var(--radius-card)] border border-dashed border-bark-200 bg-bark-50/50 p-8 text-center">
+          <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-bark-100 flex items-center justify-center">
+            <svg className="w-6 h-6 text-bark-300" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.41a2.25 2.25 0 013.182 0l2.068 2.068M12 6.75h.008v.008H12V6.75z" />
+            </svg>
+          </div>
+          <p className="text-sm text-bark-500 mb-1">No visual preview yet</p>
+          <p className="text-xs text-bark-400 mb-4">Generate a reference sheet to see how this character looks</p>
+          <button
+            onClick={handleGenerate}
+            disabled={generating}
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-sage-600 hover:bg-sage-700 disabled:opacity-50 rounded-[var(--radius-btn)] transition-colors active:scale-[0.97]"
+          >
+            {generating ? (
+              <>
+                <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                {genMessage || "Generating..."}
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+                </svg>
+                Generate Preview
+              </>
+            )}
+          </button>
+        </div>
+      )}
+
       {/* Hero header with avatar */}
       <div className="flex items-start gap-5 mb-8">
         <PaletteAvatar palette={palette} size={72} className="rounded-full shadow-md ring-2 ring-white" />
@@ -495,7 +607,7 @@ function DetailPanel({
           <button
             onClick={onCustomize}
             disabled={isCustomizing}
-            className="px-5 py-2.5 text-sm font-semibold text-white bg-amber-500 hover:bg-amber-600 disabled:opacity-50 rounded-[var(--radius-btn)] transition-colors"
+            className="px-5 py-2.5 text-sm font-semibold text-white bg-sage-600 hover:bg-sage-700 disabled:opacity-50 rounded-[var(--radius-btn)] transition-colors"
           >
             {isCustomizing ? "Duplicating..." : "Customize as New Character"}
           </button>
@@ -503,7 +615,7 @@ function DetailPanel({
           <>
             <button
               onClick={onEdit}
-              className="px-5 py-2.5 text-sm font-semibold text-white bg-amber-500 hover:bg-amber-600 rounded-[var(--radius-btn)] transition-colors"
+              className="px-5 py-2.5 text-sm font-semibold text-white bg-sage-600 hover:bg-sage-700 rounded-[var(--radius-btn)] transition-colors"
             >
               Edit Character
             </button>

@@ -42,6 +42,7 @@ class StoryRow(Base):
     language: Mapped[str | None] = mapped_column(String(40), nullable=True)
     has_images: Mapped[bool] = mapped_column(Boolean, default=False)
     has_pdf: Mapped[bool] = mapped_column(Boolean, default=False)
+    has_video: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -89,6 +90,7 @@ class KeyframeRow(Base):
     is_cover: Mapped[bool] = mapped_column(Boolean, default=False)
     page_text_translated: Mapped[str | None] = mapped_column(Text, nullable=True)
     has_image: Mapped[bool] = mapped_column(Boolean, default=False)
+    has_video: Mapped[bool] = mapped_column(Boolean, default=False)
 
     story: Mapped[StoryRow] = relationship("StoryRow", back_populates="keyframes")
 
@@ -133,6 +135,9 @@ class CharacterRow(Base):
     rules_always: Mapped[str | None] = mapped_column(Text, nullable=True)
     rules_never: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_template: Mapped[bool] = mapped_column(Boolean, default=False)
+    has_reference_sheet: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default="false"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

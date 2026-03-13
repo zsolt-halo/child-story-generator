@@ -10,6 +10,7 @@ export interface StoryListItem {
   parent_slug: string | null;
   pipeline_status: "story_review" | "cast_review" | "complete" | "draft";
   is_auto?: boolean;
+  has_video?: boolean;
 }
 
 export interface Keyframe {
@@ -57,6 +58,7 @@ export interface StoryDetail {
   slug: string;
   story: Story;
   image_urls: Record<number, string>;
+  video_urls: Record<number, string>;
   backdrop_urls: string[];
   cover_variation_urls: string[];
   reference_sheet_url: string | null;
@@ -64,6 +66,7 @@ export interface StoryDetail {
   has_pdf: boolean;
   has_screen_pdf: boolean;
   has_spread_pdf: boolean;
+  has_video: boolean;
   metadata: StoryMetadata | null;
 }
 
@@ -226,6 +229,7 @@ export interface CharacterDetail {
   story_rules: CharacterStoryRules;
   is_template: boolean;
   pipeline_id: string;
+  reference_sheet_url: string | null;
 }
 
 export interface CharacterCreateRequest {

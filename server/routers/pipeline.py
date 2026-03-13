@@ -4,7 +4,7 @@ import json
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from server.schemas import PipelineStartRequest, AutoPipelineRequest, TranslateRequest, TaskResponse, TaskStatusResponse, BranchRequest, CoverSelectionRequest, RegenerateRefSheetRequest
+from server.schemas import PipelineStartRequest, AutoPipelineRequest, TranslateRequest, TaskResponse, TaskStatusResponse, BranchRequest, CoverSelectionRequest, RegenerateRefSheetRequest, ApproveRequest
 from server.services.task_manager import task_manager
 from server.services import pipeline_service
 
@@ -101,19 +101,9 @@ async def start_illustrate_page(slug: str, page: int):
     return TaskResponse(task_id=task_id)
 
 
-@router.post("/backdrops/{slug}", response_model=TaskResponse)
-async def start_backdrops(slug: str):
-    task_id = task_manager.create_task(
-        pipeline_service.run_backdrops,
-        slug=slug,
-        exclusive=True,
-    )
-    return TaskResponse(task_id=task_id)
-
-
 @router.post("/continue/{slug}", response_model=TaskResponse)
 async def continue_pipeline(slug: str, cast_edited: bool = False):
-    """Continue pipeline after cast review: translate → illustrate → backdrops → PDF."""
+    """Continue pipeline after cast review: translate → illustrate → PDF."""
     task_id = task_manager.create_task(
         pipeline_service.run_continue_pipeline,
         slug=slug,
@@ -125,13 +115,37 @@ async def continue_pipeline(slug: str, cast_edited: bool = False):
 
 @router.post("/select-cover/{slug}", response_model=TaskResponse)
 async def select_cover(slug: str, req: CoverSelectionRequest):
-    """Continue pipeline after cover selection: copy chosen cover → page illustrations → backdrops → PDF."""
+    """Continue pipeline after cover selection: copy chosen cover → page illustrations → PDF."""
     task_id = task_manager.create_task(
         pipeline_service.run_after_cover_selection,
         slug=slug,
         choice=req.choice,
         exclusive=True,
     )
+    return TaskResponse(task_id=task_id)
+
+
+@router.post("/approve/{slug}", response_model=TaskResponse)
+async def approve_and_illustrate(slug: str, req: ApproveRequest):
+    """Unified review approval: applies cast edits, selects cover, continues to illustration + PDF."""
+    if req.cast_edited:
+        # Run continue pipeline first (cast rewrite + re-gen refs), then after_cover_selection
+        # For simplicity, we chain: run cast edits in continue, then cover selection
+        task_id = task_manager.create_task(
+            pipeline_service.run_approve_pipeline,
+            slug=slug,
+            choice=req.choice,
+            cast_edited=req.cast_edited,
+            exclusive=True,
+        )
+    else:
+        # No cast edits — go straight to cover selection + illustrations + PDF
+        task_id = task_manager.create_task(
+            pipeline_service.run_after_cover_selection,
+            slug=slug,
+            choice=req.choice,
+            exclusive=True,
+        )
     return TaskResponse(task_id=task_id)
 
 
@@ -181,6 +195,17 @@ async def start_branch(slug: str, req: BranchRequest):
             exclusive=True,
         )
 
+    return TaskResponse(task_id=task_id)
+
+
+@router.post("/animate/{slug}", response_model=TaskResponse)
+async def start_animate(slug: str):
+    """Generate animated video clips for each illustrated page."""
+    task_id = task_manager.create_task(
+        pipeline_service.run_animate,
+        slug=slug,
+        exclusive=True,
+    )
     return TaskResponse(task_id=task_id)
 
 

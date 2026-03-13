@@ -14,6 +14,7 @@ class StoryListItem(BaseModel):
     page_count: int
     has_images: bool
     has_pdf: bool
+    has_video: bool = False
     cover_url: str | None = None
     created_at: str | None = None
     title_translated: str | None = None
@@ -74,6 +75,11 @@ class CoverSelectionRequest(BaseModel):
 
 class RegenerateRefSheetRequest(BaseModel):
     member_name: str
+
+
+class ApproveRequest(BaseModel):
+    choice: int  # 1-based cover selection: 1, 2, 3, or 4
+    cast_edited: bool = False
 
 
 class BranchRequest(BaseModel):
@@ -155,6 +161,7 @@ class CharacterDetail(BaseModel):
     story_rules: CharacterStoryRulesSchema
     is_template: bool = False
     pipeline_id: str  # What to send to pipeline: bare slug for templates, "custom:<uuid>" for DB
+    reference_sheet_url: str | None = None
 
 
 class CharacterCreateRequest(BaseModel):

@@ -569,4 +569,5 @@ class StoryRepository:
             "cover_url": _cover_url_from_row(row),
             "pipeline_status": pipeline_status,
             "is_auto": bool(row.notes and row.notes.startswith("[auto]")),
+            "has_video": row.has_video,
         }

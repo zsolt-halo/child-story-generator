@@ -101,6 +101,16 @@ async def serve_style_preview(style_name: str, w: int | None = Query(None)):
     return FileResponse(thumb_path, media_type="image/jpeg")
 
 
+@router.get("/backdrops/{filename}")
+async def serve_static_backdrop(filename: str):
+    """Serve a static backdrop image from the shared pool."""
+    from src.utils.io import STATIC_BACKDROPS_DIR
+    file_path = STATIC_BACKDROPS_DIR / filename
+    if not file_path.exists() or not file_path.name.startswith("backdrop_"):
+        raise HTTPException(status_code=404, detail="Backdrop not found")
+    return FileResponse(file_path, media_type="image/png")
+
+
 @router.get("/phase-averages")
 async def get_phase_averages():
     """Return rolling averages of pipeline phase durations for ETA estimation."""

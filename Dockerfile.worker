@@ -1,0 +1,20 @@
+FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg libgl1 libglib2.0-0 && rm -rf /var/lib/apt/lists/*
+
+# PyTorch with CUDA 12.8 (bundles CUDA runtime, no nvidia/cuda base needed)
+RUN pip install --no-cache-dir \
+    torch>=2.4.0 torchvision>=0.19.0 \
+    --index-url https://download.pytorch.org/whl/cu128
+
+# Wan 2.2 deps (skip flash_attn — repo patches to SDPA fallback)
+RUN pip install --no-cache-dir \
+    opencv-python>=4.9.0.80 diffusers>=0.31.0 transformers>=4.49.0 \
+    tokenizers>=0.20.3 accelerate>=1.1.1 tqdm imageio[ffmpeg] \
+    easydict ftfy "numpy>=1.23.5,<2" imageio-ffmpeg requests \
+    einops regex
+
+COPY scripts/animation_worker.py /app/
+WORKDIR /app
+CMD ["python", "animation_worker.py"]

@@ -1,16 +1,20 @@
 import { useState, useCallback } from "react";
-import { useParams, Link, useNavigate } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { getStory, updateStory, startIllustrate, startIllustratePage, startTranslate, startAnimate, getWorkerStatus } from "../api/client";
-import { KeyframeCard } from "../components/KeyframeCard";
-import { PageEditorDrawer } from "../components/PageEditorDrawer";
-import { CastReviewPanel } from "../components/CastReviewPanel";
-import { usePipelineStore } from "../stores/pipelineStore";
-import type { CastMember } from "../api/types";
+import { useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { updateStory, startIllustrate, startIllustratePage, startTranslate, startAnimate, getWorkerStatus } from "../../api/client";
+import { KeyframeCard } from "../KeyframeCard";
+import { PageEditorDrawer } from "../PageEditorDrawer";
+import { CastReviewPanel } from "../CastReviewPanel";
+import { usePipelineStore } from "../../stores/pipelineStore";
+import type { StoryDetail, CastMember } from "../../api/types";
 
-export function Storyboard() {
-  const { slug } = useParams<{ slug: string }>();
-  const queryClient = useQueryClient();
+interface PagesTabProps {
+  slug: string;
+  data: StoryDetail;
+  invalidate: () => void;
+}
+
+export function PagesTab({ slug, data, invalidate }: PagesTabProps) {
   const navigate = useNavigate();
   const setTaskId = usePipelineStore((s) => s.setTaskId);
   const [selectedPage, setSelectedPage] = useState<number | null>(null);
@@ -20,34 +24,24 @@ export function Storyboard() {
   const [translateLang, setTranslateLang] = useState("");
   const [animating, setAnimating] = useState(false);
 
-  const { data, isLoading } = useQuery({
-    queryKey: ["story", slug],
-    queryFn: () => getStory(slug!),
-    enabled: !!slug,
-  });
-
   const { data: workerStatus } = useQuery({
     queryKey: ["worker-status"],
     queryFn: getWorkerStatus,
     staleTime: 30_000,
   });
 
-  const selectedKeyframe = data?.story.keyframes.find((kf) => kf.page_number === selectedPage) ?? null;
+  const selectedKeyframe = data.story.keyframes.find((kf) => kf.page_number === selectedPage) ?? null;
 
   const handleSave = useCallback(
     async (pageNumber: number, updates: { page_text?: string; visual_description?: string; mood?: string }) => {
-      if (!slug) return;
-      await updateStory(slug, {
-        keyframes: { [pageNumber]: updates },
-      });
-      queryClient.invalidateQueries({ queryKey: ["story", slug] });
+      await updateStory(slug, { keyframes: { [pageNumber]: updates } });
+      invalidate();
     },
-    [slug, queryClient],
+    [slug, invalidate],
   );
 
   const handleRegenerate = useCallback(
     async (pageNumber: number) => {
-      if (!slug) return;
       const res = await startIllustratePage(slug, pageNumber);
       setTaskId(res.task_id);
     },
@@ -55,13 +49,11 @@ export function Storyboard() {
   );
 
   const handleIllustrate = async () => {
-    if (!slug) return;
     const res = await startIllustrate(slug);
     setTaskId(res.task_id);
   };
 
   const handleAnimate = async () => {
-    if (!slug) return;
     setAnimating(true);
     try {
       const res = await startAnimate(slug);
@@ -74,93 +66,34 @@ export function Storyboard() {
   };
 
   const handleTranslate = async () => {
-    if (!slug || !translateLang.trim()) return;
+    if (!translateLang.trim()) return;
     setTranslating(true);
     try {
       await startTranslate(slug, translateLang.trim());
-      queryClient.invalidateQueries({ queryKey: ["story", slug] });
+      invalidate();
     } finally {
       setTranslating(false);
     }
   };
 
   const handleCastSave = async (cast: CastMember[]) => {
-    if (!slug) return;
     setSavingCast(true);
     try {
       await updateStory(slug, { cast });
-      queryClient.invalidateQueries({ queryKey: ["story", slug] });
+      invalidate();
       setShowCastEditor(false);
     } finally {
       setSavingCast(false);
     }
   };
 
-  if (isLoading) {
-    return (
-      <div className="animate-pulse space-y-4">
-        <div className="h-8 bg-bark-100 rounded w-48" />
-        <div className="grid grid-cols-4 gap-4">
-          {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className="aspect-square bg-bark-100 rounded-[var(--radius-card)]" />
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  if (!data) {
-    return <p className="text-bark-400">Story not found.</p>;
-  }
-
   return (
     <div>
-      {/* Header */}
-      <div className="flex items-start justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-extrabold text-bark-800">{data.story.title}</h1>
-          {data.story.title_translated && (
-            <p className="text-sm text-bark-400 mt-0.5">{data.story.title_translated}</p>
-          )}
-          {data.story.dedication && (
-            <p className="text-sm text-bark-500 mt-1 italic font-[family-name:var(--font-story)]">
-              {data.story.dedication}
-            </p>
-          )}
-        </div>
-        <div className="flex gap-2">
-          {data.has_pdf && (
-            <Link
-              to={`/stories/${slug}/book`}
-              className="px-4 py-2 text-xs font-medium text-bark-600 bg-white border border-bark-200 hover:bg-bark-50 rounded-[var(--radius-btn)] transition-colors"
-            >
-              View Book
-            </Link>
-          )}
-          {Object.keys(data.image_urls).length > 0 && (
-            <Link
-              to={`/stories/${slug}/read-along`}
-              className="px-4 py-2 text-xs font-medium text-bark-600 bg-white border border-bark-200 hover:bg-bark-50 rounded-[var(--radius-btn)] transition-colors"
-            >
-              Read Along
-            </Link>
-          )}
-          {Object.keys(data.image_urls).length > 0 && (
-            <Link
-              to={`/stories/${slug}/review`}
-              className="px-4 py-2 text-xs font-medium text-white bg-sage-600 hover:bg-sage-700 rounded-[var(--radius-btn)] transition-colors"
-            >
-              Review Illustrations
-            </Link>
-          )}
-        </div>
-      </div>
-
       {/* Actions bar */}
       <div className="flex flex-wrap gap-3 mb-6 p-4 bg-white rounded-[var(--radius-card)] border border-bark-100">
         <button
           onClick={handleIllustrate}
-          className="px-4 py-2 text-xs font-semibold text-white bg-amber-500 hover:bg-amber-600 rounded-[var(--radius-btn)] transition-colors"
+          className="px-4 py-2 text-xs font-semibold text-white bg-sage-600 hover:bg-sage-700 rounded-[var(--radius-btn)] transition-colors active:scale-[0.97]"
         >
           Generate Illustrations
         </button>
@@ -168,8 +101,8 @@ export function Storyboard() {
           <button
             onClick={handleAnimate}
             disabled={animating}
-            className="px-4 py-2 text-xs font-semibold text-white bg-sage-500 hover:bg-sage-600 disabled:opacity-50 rounded-[var(--radius-btn)] transition-colors"
-            title={workerStatus?.available ? "GPU worker connected" : "GPU worker not connected — start animate.bat first"}
+            className="px-4 py-2 text-xs font-semibold text-white bg-sage-500 hover:bg-sage-600 disabled:opacity-50 rounded-[var(--radius-btn)] transition-colors active:scale-[0.97]"
+            title={workerStatus?.available ? "GPU worker connected" : "GPU worker not connected"}
           >
             {animating ? "Starting..." : "Animate Pages"}
             {workerStatus && !workerStatus.available && (
@@ -188,14 +121,13 @@ export function Storyboard() {
             {showCastEditor ? "Hide Cast" : `Edit Cast (${data.story.cast.length})`}
           </button>
         )}
-
         <div className="flex items-center gap-2">
           <input
             type="text"
             value={translateLang}
             onChange={(e) => setTranslateLang(e.target.value)}
             placeholder="Language..."
-            className="px-3 py-2 text-xs bg-cream border border-bark-200 rounded-[var(--radius-btn)] w-28 focus:outline-none focus:border-amber-400"
+            className="px-3 py-2 text-xs bg-cream border border-bark-200 rounded-[var(--radius-btn)] w-28 focus:outline-none focus-visible:ring-2 focus-visible:ring-sage-400"
           />
           <button
             onClick={handleTranslate}
@@ -208,7 +140,7 @@ export function Storyboard() {
       </div>
 
       {/* Cast editor */}
-      {showCastEditor && data.story.cast && slug && (
+      {showCastEditor && data.story.cast && (
         <div className="mb-6">
           <CastReviewPanel
             slug={slug}
@@ -233,7 +165,6 @@ export function Storyboard() {
         ))}
       </div>
 
-      {/* Page editor drawer */}
       <PageEditorDrawer
         keyframe={selectedKeyframe}
         imageUrl={selectedPage !== null ? data.image_urls[selectedPage] : undefined}

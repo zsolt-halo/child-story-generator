@@ -1,15 +1,39 @@
-import { useParams, Link } from "react-router-dom";
+import { useState } from "react";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { getStory } from "../api/client";
+import { getStory, startAnimate, getWorkerStatus } from "../api/client";
+import { usePipelineStore } from "../stores/pipelineStore";
 
 export function BookPreview() {
   const { slug } = useParams<{ slug: string }>();
+  const navigate = useNavigate();
+  const setTaskId = usePipelineStore((s) => s.setTaskId);
+  const [animating, setAnimating] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ["story", slug],
     queryFn: () => getStory(slug!),
     enabled: !!slug,
   });
+
+  const { data: workerStatus } = useQuery({
+    queryKey: ["worker-status"],
+    queryFn: getWorkerStatus,
+    staleTime: 30_000,
+  });
+
+  const handleAnimate = async () => {
+    if (!slug) return;
+    setAnimating(true);
+    try {
+      const res = await startAnimate(slug);
+      setTaskId(res.task_id);
+      navigate(`/stories/${slug}/pipeline`, { state: { taskId: res.task_id } });
+    } catch (err) {
+      console.error("Failed to start animation:", err);
+      setAnimating(false);
+    }
+  };
 
   if (isLoading) {
     return <div className="animate-pulse"><div className="h-8 bg-bark-100 rounded w-48" /></div>;
@@ -29,6 +53,12 @@ export function BookPreview() {
         </div>
         <div className="flex gap-2">
           <Link
+            to={`/stories/${slug}/read-along`}
+            className="px-4 py-2 text-xs font-medium text-bark-600 bg-white border border-bark-200 hover:bg-bark-50 rounded-[var(--radius-btn)] transition-colors"
+          >
+            Read Along
+          </Link>
+          <Link
             to={`/stories/${slug}/storyboard`}
             className="px-4 py-2 text-xs font-medium text-bark-600 bg-white border border-bark-200 hover:bg-bark-50 rounded-[var(--radius-btn)] transition-colors"
           >
@@ -40,6 +70,22 @@ export function BookPreview() {
           >
             Review
           </Link>
+          {Object.keys(data.image_urls).length > 0 && (
+            <button
+              onClick={handleAnimate}
+              disabled={animating}
+              className="px-4 py-2 text-xs font-semibold text-white bg-sage-500 hover:bg-sage-600 disabled:opacity-50 rounded-[var(--radius-btn)] transition-colors"
+              title={workerStatus?.available ? "GPU worker connected" : "GPU worker not connected — start animate.bat first"}
+            >
+              {animating ? "Starting..." : "Animate Pages"}
+              {workerStatus && !workerStatus.available && (
+                <span className="ml-1.5 inline-block w-2 h-2 rounded-full bg-rose-accent" />
+              )}
+              {workerStatus?.available && (
+                <span className="ml-1.5 inline-block w-2 h-2 rounded-full bg-sage-300" />
+              )}
+            </button>
+          )}
         </div>
       </div>
 

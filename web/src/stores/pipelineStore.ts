@@ -23,12 +23,16 @@ interface PipelineState {
   castMembers: CastMember[];
   castRefUrls: Record<string, string>;
   mainRefSheetUrl: string | null;
-  waitingForStoryReview: boolean;
-  waitingForCastReview: boolean;
   coverVariations: CoverVariation[];
-  waitingForCoverSelection: boolean;
   queuePosition: number;
   queueAhead: number;
+
+  // Unified review gate — replaces separate story/cast/cover waiting states
+  waitingForReview: boolean;
+  // Legacy compat — these derived from waitingForReview for PipelineTimeline
+  waitingForStoryReview: boolean;
+  waitingForCastReview: boolean;
+  waitingForCoverSelection: boolean;
 
   // Phase timing & detail tracking
   phaseData: Record<string, Record<string, unknown>>;
@@ -40,6 +44,8 @@ interface PipelineState {
   restoreState: (data: {
     slug: string;
     title?: string;
+    waitingForReview?: boolean;
+    // Legacy fields for recovery from old pipeline states
     waitingForStoryReview?: boolean;
     waitingForCastReview?: boolean;
     waitingForCoverSelection?: boolean;
@@ -66,9 +72,10 @@ const initialState = {
   castMembers: [] as CastMember[],
   castRefUrls: {} as Record<string, string>,
   mainRefSheetUrl: null as string | null,
+  coverVariations: [] as CoverVariation[],
+  waitingForReview: false,
   waitingForStoryReview: false,
   waitingForCastReview: false,
-  coverVariations: [] as CoverVariation[],
   waitingForCoverSelection: false,
   queuePosition: 0,
   queueAhead: 0,
@@ -101,7 +108,6 @@ export const usePipelineStore = create<PipelineState>((set) => ({
           };
         case "phase_complete": {
           const phase = event.phase;
-          // Prefer server-authoritative elapsed time, fall back to client-side
           const startTime = state.phaseStartTime;
           const clientElapsed = startTime ? Math.round((Date.now() - startTime) / 1000) : null;
           const elapsed = event.elapsed != null ? Math.round(event.elapsed as number) : clientElapsed;
@@ -111,19 +117,15 @@ export const usePipelineStore = create<PipelineState>((set) => ({
             phaseStartTime: null,
             resultSlug: event.data?.slug as string ?? state.resultSlug,
           };
-          // Store per-phase completion data
           if (phase && event.data) {
             updates.phaseData = { ...state.phaseData, [phase]: event.data };
           }
-          // Store per-phase elapsed time
           if (phase && elapsed != null) {
             updates.phaseElapsed = { ...state.phaseElapsed, [phase]: elapsed };
           }
-          // Capture cast members when cast phase completes
           if (phase === "cast" && event.data?.members) {
             updates.castMembers = event.data.members as CastMember[];
           }
-          // Capture main character reference sheet URL
           if (phase === "reference_sheet" && event.data?.url) {
             updates.mainRefSheetUrl = event.data.url as string;
           }
@@ -159,8 +161,6 @@ export const usePipelineStore = create<PipelineState>((set) => ({
         case "task_complete": {
           const result = event.result ?? {};
           const slug = (result.slug as string) ?? state.resultSlug;
-          const hasKeyframes = !!(result.has_keyframes);
-          const hasCast = state.castMembers.length > 0 || (result.cast_count as number) > 0;
 
           // Use cover variations from result as fallback if SSE events were missed
           const resultCovers = result.cover_variations as CoverVariation[] | undefined;
@@ -177,19 +177,18 @@ export const usePipelineStore = create<PipelineState>((set) => ({
           const mergedCastRefUrls = { ...state.castRefUrls, ...castRefUrlsFromResult };
           const mainRef = (result.reference_sheet_url as string) ?? state.mainRefSheetUrl;
 
-          // If story+keyframes done but no cast yet, pause for story review
-          const shouldWaitStory = hasKeyframes && !hasCast && state.images.length === 0 && covers.length === 0;
-          // If cast present but no images, pause for cast review
-          const shouldWaitCast = hasCast && state.images.length === 0 && covers.length === 0;
-          // If cover variations were generated, pause for cover selection
-          const shouldWaitCover = covers.length > 0;
+          // Unified review gate: if cover variations exist, pause for review
+          const shouldWaitForReview = covers.length > 0 && state.images.length === 0;
+
           return {
             completed: true,
             resultSlug: slug,
             resultTitle: (result.title as string) ?? state.resultTitle,
-            waitingForStoryReview: shouldWaitStory,
-            waitingForCastReview: shouldWaitCast,
-            waitingForCoverSelection: shouldWaitCover,
+            waitingForReview: shouldWaitForReview,
+            // Set legacy flags for PipelineTimeline compatibility
+            waitingForStoryReview: false,
+            waitingForCastReview: false,
+            waitingForCoverSelection: shouldWaitForReview,
             coverVariations: covers,
             castRefUrls: mergedCastRefUrls,
             mainRefSheetUrl: mainRef,
@@ -203,17 +202,9 @@ export const usePipelineStore = create<PipelineState>((set) => ({
     }),
 
   restoreState: (data) => {
-    // Determine which phase to mark as current so the timeline
-    // shows prior phases as done (green checkmarks).
-    // cast_reference_sheets comes after cast in the timeline, so if we have
-    // cast ref URLs, mark that phase as the latest completed.
-    const phase = data.waitingForCoverSelection
-      ? "cover_variations"
-      : data.waitingForCastReview
-        ? "cast_reference_sheets"
-        : data.waitingForStoryReview
-          ? "keyframes"
-          : null;
+    // Determine which phase to mark as current for timeline
+    const isReview = data.waitingForReview || data.waitingForCoverSelection || data.waitingForCastReview || data.waitingForStoryReview;
+    const phase = isReview ? "cover_variations" : null;
     set({
       ...initialState,
       taskId: null,
@@ -221,9 +212,11 @@ export const usePipelineStore = create<PipelineState>((set) => ({
       completed: true,
       resultSlug: data.slug,
       resultTitle: data.title ?? null,
-      waitingForStoryReview: data.waitingForStoryReview ?? false,
-      waitingForCastReview: data.waitingForCastReview ?? false,
-      waitingForCoverSelection: data.waitingForCoverSelection ?? false,
+      waitingForReview: isReview ?? false,
+      // Legacy compat
+      waitingForStoryReview: false,
+      waitingForCastReview: false,
+      waitingForCoverSelection: isReview ?? false,
       castMembers: data.castMembers ?? [],
       coverVariations: data.coverVariations ?? [],
       castRefUrls: data.castRefUrls ?? {},

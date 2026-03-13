@@ -33,13 +33,18 @@ def _row_to_dict(row) -> dict:
         },
         "is_template": False,
         "pipeline_id": f"custom:{row.id}",
+        "reference_sheet_url": f"/api/characters/{row.id}/reference-sheet" if row.has_reference_sheet else None,
     }
 
 
 def _toml_to_dict(slug: str, char: Character) -> dict:
     """Convert a TOML-loaded Character to an API-friendly dict."""
+    from pathlib import Path
+
     d = char.model_dump()
-    d.update(id=None, slug=slug, is_template=True, pipeline_id=slug)
+    ref_sheet_path = Path(f"characters/{slug}/reference_sheet.png")
+    ref_url = f"/api/characters/template/{slug}/reference-sheet" if ref_sheet_path.exists() else None
+    d.update(id=None, slug=slug, is_template=True, pipeline_id=slug, reference_sheet_url=ref_url)
     return d
 
 
@@ -200,3 +205,47 @@ async def polish_character(
 
     d = result.model_dump()
     return {k: d[k] for k in ("personality", "visual", "story_rules")}
+
+
+async def generate_character_reference_sheet(task_id: str, identifier: str, slug: str) -> None:
+    """Generate a visual reference sheet for a character (runs as a task)."""
+    import asyncio
+    from pathlib import Path
+
+    from server.services.task_manager import task_manager
+    from src.utils.config import async_resolve_character
+    from src.models import BookConfig
+    from src.artist.generator import generate_reference_sheet
+
+    await task_manager.broadcast(task_id, {
+        "type": "phase_start",
+        "phase": "reference_sheet",
+        "message": f"Generating reference sheet for {slug}...",
+    })
+
+    character = await async_resolve_character(identifier)
+
+    output_dir = Path(f"characters/{slug}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    config = BookConfig()
+    await asyncio.to_thread(
+        generate_reference_sheet, character, "digital illustration", config, output_dir
+    )
+
+    # Update DB flag for custom characters
+    if identifier.startswith("custom:"):
+        char_id = identifier.removeprefix("custom:")
+        await _repo.async_set_has_reference_sheet(uuid.UUID(char_id), True)
+
+    # Determine the URL based on character type
+    if identifier.startswith("custom:"):
+        char_id = identifier.removeprefix("custom:")
+        url = f"/api/characters/{char_id}/reference-sheet"
+    else:
+        url = f"/api/characters/template/{slug}/reference-sheet"
+
+    await task_manager.broadcast(task_id, {
+        "type": "reference_sheet_complete",
+        "url": url,
+    })

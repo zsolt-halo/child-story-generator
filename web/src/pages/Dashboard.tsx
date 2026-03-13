@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { listStories, deleteStory, listPresets, listAllCharacters, startAutoGenerate, deletePreset, updatePreset } from "../api/client";
 import { StoryCard } from "../components/StoryCard";
 import { PresetCard } from "../components/PresetCard";
+import { WelcomeHero } from "../components/WelcomeHero";
 import { ConfirmDeleteDialog } from "../components/ConfirmDeleteDialog";
 import { usePipelineStore } from "../stores/pipelineStore";
 import type { StoryListItem, PresetDetail } from "../api/types";
@@ -86,8 +87,9 @@ export function Dashboard() {
     <div>
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-extrabold text-bark-800">Your Stories</h1>
-          <p className="text-sm text-bark-400 mt-1">Create and manage illustrated children's books</p>
+          <h1 className="text-3xl font-extrabold text-bark-800">Your Stories</h1>
+          <div className="w-12 h-0.5 bg-sage-400 rounded-full mt-2" />
+          <p className="text-sm text-bark-400 mt-2">Create and manage illustrated children's books</p>
         </div>
         <div className="flex items-center gap-2">
           <Link
@@ -101,7 +103,7 @@ export function Dashboard() {
           </Link>
           <Link
             to="/new"
-            className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold rounded-[var(--radius-btn)] transition-colors shadow-sm"
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-sage-600 hover:bg-sage-700 text-white text-sm font-semibold rounded-[var(--radius-btn)] transition-colors shadow-sm active:scale-[0.97]"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
@@ -147,7 +149,7 @@ export function Dashboard() {
           ))}
         </div>
       ) : stories && stories.length > 0 ? (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-5 gap-y-8">
           {stories.map((story) => (
             <StoryCard
               key={story.slug}
@@ -157,21 +159,7 @@ export function Dashboard() {
           ))}
         </div>
       ) : (
-        <div className="text-center py-20">
-          <div className="w-20 h-20 mx-auto mb-4 bg-cream-dark rounded-full flex items-center justify-center">
-            <svg className="w-10 h-10 text-bark-300" fill="none" viewBox="0 0 24 24" strokeWidth={1} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
-            </svg>
-          </div>
-          <h2 className="text-lg font-bold text-bark-600 mb-1">No stories yet</h2>
-          <p className="text-sm text-bark-400 mb-6">Create your first illustrated children's book</p>
-          <Link
-            to="/new"
-            className="inline-flex items-center gap-2 px-6 py-3 bg-amber-500 hover:bg-amber-600 text-white font-semibold rounded-[var(--radius-btn)] transition-colors"
-          >
-            Create Your First Story
-          </Link>
-        </div>
+        <WelcomeHero />
       )}
 
       <ConfirmDeleteDialog

@@ -218,22 +218,10 @@ def generate(notes_file: Path, character: str, narrator: str, style: str, pages:
     repo.save(slug, story, [str(p) for p in image_paths])
     console.print(f"[green]Images saved to:[/green] {images_dir}\n")
 
-    # Phase 3b: Backdrops for text pages
-    backdrops_dir = output_dir / "backdrops"
-    console.print(Panel("Generating text page backdrops...", title="Phase 3b: Backdrops"))
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TextColumn("{task.completed}/{task.total}"),
-    ) as progress:
-        from src.artist.generator import generate_backdrops
-        backdrop_paths = generate_backdrops(config, style_anchor, backdrops_dir, progress=progress)
-
-    console.print(f"[green]Backdrops:[/green] {len(backdrop_paths)} generated\n")
-
-    # Phase 4: PDF assembly
-    _render_pdf(story, image_paths, output_dir, backdrop_paths)
+    # Phase 4: PDF assembly (uses static backdrop pool)
+    from src.utils.io import get_static_backdrops
+    backdrop_paths = get_static_backdrops(slug)
+    _render_pdf(story, image_paths, output_dir, backdrop_paths or None)
 
 
 def _render_pdf(story: Story, image_paths: list[Path], output_dir: Path, backdrop_paths: list[Path] | None = None):
@@ -303,12 +291,8 @@ def pdf(story_dir: Path, language: str):
         console.print(f"[red]Missing {len(missing)} images. Run 'generate --resume' first.[/red]")
         raise SystemExit(1)
 
-    from src.utils.io import discover_backdrops
-    backdrop_paths = discover_backdrops(story_dir)
-
-    if backdrop_paths:
-        console.print(f"[green]Backdrops:[/green] {len(backdrop_paths)} found")
-
+    from src.utils.io import get_static_backdrops
+    backdrop_paths = get_static_backdrops(slug)
     _render_pdf(story, image_paths, story_dir, backdrop_paths or None)
 
 

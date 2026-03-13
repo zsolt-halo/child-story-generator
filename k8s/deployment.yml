@@ -58,6 +58,13 @@ spec:
               value: "http://tempo.monitoring.svc.cluster.local:4318/v1/traces"
             - name: OTEL_SERVICE_NAME
               value: "starlight-backend"
+            - name: ANIMATION_MODE
+              value: "remote"
+            - name: WORKER_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: starlight-secrets
+                  key: worker-auth-token
           volumeMounts:
             - name: stories
               mountPath: /app/stories

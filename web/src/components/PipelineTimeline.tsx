@@ -2,17 +2,16 @@ import { useState, useEffect, useMemo } from "react";
 
 const PHASES = [
   { key: "premise", label: "Story Idea" },
-  { key: "story", label: "Story Generation" },
-  { key: "keyframes", label: "Page Keyframes" },
-  { key: "cast", label: "Cast Extraction" },
-  { key: "reference_sheet", label: "Character Reference" },
-  { key: "cast_reference_sheets", label: "Cast References" },
-  { key: "cast_rewrite", label: "Cast Consistency" },
-  { key: "translation", label: "Translation" },
-  { key: "cover_variations", label: "Cover Options" },
-  { key: "illustration", label: "Illustrations" },
-  { key: "backdrops", label: "Backdrops" },
-  { key: "pdf", label: "PDF Rendering" },
+  { key: "story", label: "Writing Your Story" },
+  { key: "keyframes", label: "Planning the Pages" },
+  { key: "cast", label: "Meeting the Characters" },
+  { key: "reference_sheet", label: "Drawing the Hero" },
+  { key: "cast_reference_sheets", label: "Drawing the Cast" },
+  { key: "cast_rewrite", label: "Polishing the Scenes" },
+  { key: "translation", label: "Speaking Your Language" },
+  { key: "cover_variations", label: "Designing the Cover" },
+  { key: "illustration", label: "Painting Every Page" },
+  { key: "pdf", label: "Binding the Book" },
 ];
 
 /* ─── Phase-specific icons (Heroicons outline, 24x24) ─── */
@@ -48,8 +47,6 @@ function PhaseIcon({ phaseKey }: { phaseKey: string }) {
       return <svg {...p}><path d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21zM16.5 8.25a1.125 1.125 0 11-2.25 0 1.125 1.125 0 012.25 0z" /></svg>;
     case "illustration":
       return <svg {...p}><path d="M9.53 16.122a3 3 0 00-5.78 1.128 2.25 2.25 0 01-2.4 2.245 4.5 4.5 0 008.4-2.245c0-.399-.078-.78-.22-1.128zm0 0a15.998 15.998 0 003.388-1.62m-5.043-.025a15.994 15.994 0 011.622-3.395m3.42 3.42a15.995 15.995 0 004.764-4.648l3.876-5.814a1.151 1.151 0 00-1.597-1.597L14.146 6.32a15.996 15.996 0 00-4.649 4.763m3.42 3.42a6.776 6.776 0 00-3.42-3.42" /></svg>;
-    case "backdrops":
-      return <svg {...p}><path d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z" /></svg>;
     case "pdf":
       return <svg {...p}><path d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" /></svg>;
     default:
@@ -87,8 +84,6 @@ function formatPhaseDetail(key: string, data: Record<string, unknown>): string |
       return data.count ? `${data.count} options created` : null;
     case "illustration":
       return "All pages illustrated";
-    case "backdrops":
-      return data.count ? `${data.count} backgrounds painted` : null;
     case "pdf":
       return "Book rendered";
     default:
@@ -219,15 +214,10 @@ export function PipelineTimeline({
         </div>
         <div className="h-1.5 bg-bark-100 rounded-full overflow-hidden">
           <div
-            className={`h-full rounded-full transition-all duration-700 ease-out ${
-              completed && !isWaitingAny ? "" : "tl-shimmer"
-            }`}
+            className="h-full rounded-full transition-all duration-700 ease-out"
             style={{
               width: `${progressPct}%`,
-              background:
-                completed && !isWaitingAny
-                  ? "var(--color-sage-400)"
-                  : "linear-gradient(90deg, var(--color-sage-400), var(--color-amber-400, #f59e0b))",
+              background: "var(--color-sage-400)",
             }}
           />
         </div>
@@ -277,27 +267,16 @@ export function PipelineTimeline({
 
               {/* Node circle with effects */}
               <div className="relative z-10 shrink-0 pt-0.5">
-                {/* Ripple rings for active & waiting states */}
-                {isActive && (
-                  <>
-                    <div className="absolute inset-0 rounded-full bg-amber-400/30 tl-ripple" />
-                    <div className="absolute inset-0 rounded-full bg-amber-400/20 tl-ripple-delayed" />
-                  </>
-                )}
-                {isWaiting && (
-                  <div className="absolute inset-0 rounded-full bg-amber-400/25 tl-ripple" />
-                )}
-
                 <div
                   className={`relative w-9 h-9 rounded-full flex items-center justify-center transition-all duration-500 ${
                     isFailed
                       ? "bg-red-100 text-red-500 ring-2 ring-red-200"
                       : isWaiting
-                        ? "bg-amber-100 text-amber-600 ring-2 ring-amber-300"
+                        ? "bg-amber-100 text-amber-600 ring-2 ring-amber-300 tl-pulse"
                         : isDone
                           ? "bg-sage-500 text-white shadow-sm"
                           : isActive
-                            ? "bg-amber-400 text-amber-900 shadow-lg shadow-amber-300/30 tl-glow"
+                            ? "bg-sage-400 text-white shadow-md tl-pulse"
                             : "bg-bark-100 text-bark-300"
                   }`}
                 >
@@ -361,7 +340,7 @@ export function PipelineTimeline({
                     </span>
                   )}
                   {isActive && liveElapsed > 0 && (
-                    <span className="text-[10px] text-amber-500/70 tabular-nums font-medium">
+                    <span className="text-[10px] text-sage-500/70 tabular-nums font-medium">
                       {formatElapsed(liveElapsed)}
                     </span>
                   )}
@@ -375,7 +354,7 @@ export function PipelineTimeline({
 
                 {/* Active: phase message */}
                 {isActive && phaseMessage && (
-                  <p className="text-xs text-amber-600/80 mt-0.5 tl-fade-in">{phaseMessage}</p>
+                  <p className="text-xs text-sage-600/80 mt-0.5 tl-fade-in">{phaseMessage}</p>
                 )}
 
                 {/* Active illustration: inline progress bar */}
@@ -384,7 +363,7 @@ export function PipelineTimeline({
                     <div className="flex items-center gap-2">
                       <div className="flex-1 h-1 bg-bark-100 rounded-full overflow-hidden">
                         <div
-                          className="h-full bg-amber-400 rounded-full transition-all duration-500"
+                          className="h-full bg-sage-400 rounded-full transition-all duration-500"
                           style={{ width: `${(imageProgress / imageTotal) * 100}%` }}
                         />
                       </div>

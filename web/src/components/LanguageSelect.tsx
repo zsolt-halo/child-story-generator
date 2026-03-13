@@ -43,9 +43,10 @@ const LANGUAGES: Language[] = [
 interface LanguageSelectProps {
   value: string;
   onChange: (value: string) => void;
+  compact?: boolean;
 }
 
-export function LanguageSelect({ value, onChange }: LanguageSelectProps) {
+export function LanguageSelect({ value, onChange, compact }: LanguageSelectProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [highlightIndex, setHighlightIndex] = useState(0);
@@ -132,11 +133,13 @@ export function LanguageSelect({ value, onChange }: LanguageSelectProps) {
 
   return (
     <div ref={containerRef} className="relative">
-      <span className="text-xs font-semibold text-bark-500 uppercase tracking-wide">
-        Translation Language (optional)
-      </span>
+      {!compact && (
+        <span className="text-xs font-semibold text-bark-500 uppercase tracking-wide">
+          Translation Language (optional)
+        </span>
+      )}
 
-      <div className="relative mt-1.5">
+      <div className={`relative ${compact ? "" : "mt-1.5"}`}>
         {/* Selected chip shown when not editing */}
         {selected && !open ? (
           <button

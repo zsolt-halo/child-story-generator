@@ -148,6 +148,15 @@ class CharacterRepository:
             await session.delete(row)
             await session.commit()
 
+    async def async_set_has_reference_sheet(self, char_id: uuid.UUID, value: bool = True) -> None:
+        """Update the has_reference_sheet flag for a character."""
+        AsyncSession = get_async_session_factory()
+        async with AsyncSession() as session:
+            row = await session.get(CharacterRow, char_id)
+            if row:
+                row.has_reference_sheet = value
+                await session.commit()
+
     # -----------------------------------------------------------------------
     # Sync methods (for CLI)
     # -----------------------------------------------------------------------
