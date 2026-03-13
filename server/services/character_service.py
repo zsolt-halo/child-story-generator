@@ -42,7 +42,7 @@ def _toml_to_dict(slug: str, char: Character) -> dict:
     from pathlib import Path
 
     d = char.model_dump()
-    ref_sheet_path = Path(f"characters/{slug}/reference_sheet.png")
+    ref_sheet_path = Path(f"stories/.characters/{slug}/reference_sheet.png")
     ref_url = f"/api/characters/template/{slug}/reference-sheet" if ref_sheet_path.exists() else None
     d.update(id=None, slug=slug, is_template=True, pipeline_id=slug, reference_sheet_url=ref_url)
     return d
@@ -225,7 +225,7 @@ async def generate_character_reference_sheet(task_id: str, identifier: str, slug
 
     character = await async_resolve_character(identifier)
 
-    output_dir = Path(f"characters/{slug}")
+    output_dir = Path(f"stories/.characters/{slug}")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     config = BookConfig()

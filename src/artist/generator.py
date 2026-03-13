@@ -99,27 +99,7 @@ def _extract_image_bytes(response) -> bytes | None:
     return None
 
 
-def _is_imagen_model(model: str) -> bool:
-    """Check if a model identifier is an Imagen model (uses generate_images API)."""
-    return model.startswith("imagen-")
-
-
-def _generate_via_imagen(client: genai.Client, prompt: str, model: str) -> bytes:
-    """Generate image via Imagen generate_images API (text-only, no reference support)."""
-    response = client.models.generate_images(
-        model=model,
-        prompt=prompt,
-        config=types.GenerateImagesConfig(
-            number_of_images=1,
-            output_mime_type="image/png",
-        ),
-    )
-    if not response.generated_images:
-        raise RuntimeError("No images in Imagen response")
-    return response.generated_images[0].image.image_bytes
-
-
-def _generate_via_gemini(
+def _generate_image(
     client: genai.Client,
     prompt: str,
     model: str,
@@ -159,48 +139,26 @@ def generate_single_image(
     output_path: Path,
     reference_image: bytes | None = None,
     additional_references: list[bytes] | None = None,
-    multimodal_model: str | None = None,
 ) -> Path:
-    """Generate a single image and save it to disk.
-
-    Uses Imagen API for imagen-* models (text-only, cheapest) or Gemini
-    generate_content API for gemini-* models (supports reference images).
-
-    When reference images are provided and the primary model is Imagen,
-    automatically falls back to *multimodal_model* (Gemini) so character
-    reference sheets are still used for consistency.
-    """
-    has_refs = reference_image is not None or additional_references
-    use_imagen = _is_imagen_model(model) and not has_refs
-    actual_model = model if use_imagen else (multimodal_model or model)
-
-    if has_refs and _is_imagen_model(model):
-        logger.debug(
-            "Falling back to %s for %s (reference images not supported by Imagen)",
-            actual_model, output_path.name,
-        )
-
-    logger.debug("Generating image: %s (model=%s)", output_path.name, actual_model)
+    """Generate a single image via Gemini and save it to disk."""
+    logger.debug("Generating image: %s (model=%s)", output_path.name, model)
     with tracer.start_as_current_span(
         "image.generate",
-        attributes={"image.model": actual_model, "image.output": output_path.name},
+        attributes={"image.model": model, "image.output": output_path.name},
     ) as span:
         for attempt in range(MAX_RETRIES):
             try:
-                if _is_imagen_model(actual_model):
-                    image_bytes = _generate_via_imagen(client, prompt, actual_model)
-                else:
-                    image_bytes = _generate_via_gemini(
-                        client, prompt, actual_model,
-                        reference_image=reference_image,
-                        additional_references=additional_references,
-                    )
+                image_bytes = _generate_image(
+                    client, prompt, model,
+                    reference_image=reference_image,
+                    additional_references=additional_references,
+                )
 
                 output_path.parent.mkdir(parents=True, exist_ok=True)
                 output_path.write_bytes(image_bytes)
                 span.set_attribute("image.size_kb", len(image_bytes) // 1024)
                 logger.info("Image saved: %s (%d KB)", output_path.name, len(image_bytes) // 1024)
-                _record_image_result("success", actual_model)
+                _record_image_result("success", model)
                 return output_path
 
             except Exception as e:
@@ -215,7 +173,7 @@ def generate_single_image(
                 else:
                     span.set_status(trace.StatusCode.ERROR, str(e))
                     span.record_exception(e)
-                    _record_image_result("failure", actual_model)
+                    _record_image_result("failure", model)
                     raise RuntimeError(f"Image generation failed after {MAX_RETRIES} attempts: {e}") from e
 
     raise RuntimeError("Unreachable")
@@ -315,7 +273,6 @@ def generate_cover_variations(
         generate_single_image(
             client, prompt, config.image_model, raw_path,
             reference_image=reference_image,
-            multimodal_model=config.image_model_multimodal,
         )
         upscale_for_print(raw_path, final_path)
         paths.append(final_path)
@@ -452,7 +409,6 @@ def generate_all_illustrations(
             client, prompt, config.image_model, raw_path,
             reference_image=reference_image,
             additional_references=additional_refs if additional_refs else None,
-            multimodal_model=config.image_model_multimodal,
         )
 
         upscale_for_print(raw_path, final_path)

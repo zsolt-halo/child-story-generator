@@ -106,7 +106,7 @@ async def polish_character(req: CharacterPolishRequest):
 @router.get("/template/{slug}/reference-sheet")
 async def serve_template_reference_sheet(slug: str, w: int | None = Query(None)):
     """Serve the reference sheet image for a TOML template character."""
-    file_path = Path(f"characters/{slug}/reference_sheet.png")
+    file_path = Path(f"stories/.characters/{slug}/reference_sheet.png")
     if not file_path.exists():
         raise HTTPException(404, "Reference sheet not found")
 
@@ -134,7 +134,7 @@ async def serve_reference_sheet(id: str, w: int | None = Query(None)):
     except (FileNotFoundError, ValueError):
         raise HTTPException(404, "Character not found")
 
-    file_path = Path(f"characters/{row.slug}/reference_sheet.png")
+    file_path = Path(f"stories/.characters/{row.slug}/reference_sheet.png")
     if not file_path.exists():
         raise HTTPException(404, "Reference sheet not found")
 

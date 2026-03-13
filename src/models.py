@@ -67,8 +67,7 @@ class BookConfig(BaseModel):
     language: str = ""
     output: Path = Path("stories")
     text_model: str = "gemini-2.5-pro"
-    image_model: str = "imagen-4.0-fast-generate-001"
-    image_model_multimodal: str = "gemini-2.5-flash-image"
+    image_model: str = "gemini-2.5-flash-image"
     gemini_api_key: str = ""
     gateway_base_url: str = ""
     gateway_api_key: str = ""

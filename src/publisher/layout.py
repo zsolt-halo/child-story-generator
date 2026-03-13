@@ -134,7 +134,7 @@ def render_screen_pdf(print_pdf: Path, output_path: Path, dpi: int = 120) -> Pat
 
         doc = fitz.open(str(print_pdf))
         doc.rewrite_images(
-            dpi_threshold=150,
+            dpi_threshold=max(dpi + 50, 200),
             dpi_target=dpi,
             quality=70,
             lossy=True,

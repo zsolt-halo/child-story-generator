@@ -18,6 +18,7 @@
 #     "einops",
 #     "regex",
 #     "Pillow>=10.0.0",
+#     "rich>=13.0",
 # ]
 #
 # [[tool.uv.index]]
@@ -46,6 +47,7 @@ Usage:
     BACKEND_URL=http://localhost:8000,http://192.168.86.45:30082 uv run scripts/animation_worker.py
 """
 
+import ctypes
 import io
 import logging
 import os
@@ -56,14 +58,53 @@ import time
 import warnings
 
 import requests
+from rich.console import Console
+from rich.live import Live
+from rich.panel import Panel
+from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn, TaskProgressColumn
+from rich.table import Table
+from rich.text import Text
 
 warnings.filterwarnings("ignore")
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="[animation-worker %(asctime)s] %(levelname)s: %(message)s",
-)
+# Suppress noisy loggers — we use rich for output
+logging.basicConfig(level=logging.WARNING, format="%(message)s")
+for _quiet in ("urllib3", "requests", "torch", "transformers", "diffusers", "fontTools", "PIL"):
+    logging.getLogger(_quiet).setLevel(logging.ERROR)
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+console = Console()
+
+# Windows sleep prevention via SetThreadExecutionState
+ES_CONTINUOUS = 0x80000000
+ES_SYSTEM_REQUIRED = 0x00000001
+ES_DISPLAY_REQUIRED = 0x00000002
+_wake_lock_held = False
+
+
+def _keep_awake():
+    """Prevent Windows from sleeping or turning off the display."""
+    global _wake_lock_held
+    if _wake_lock_held or sys.platform != "win32":
+        return
+    ctypes.windll.kernel32.SetThreadExecutionState(
+        ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED
+    )
+    _wake_lock_held = True
+    console.print("  [bold black on bright_yellow] WAKE LOCK [/] [yellow]System sleep blocked — GPU is working[/]")
+
+
+def _allow_sleep():
+    """Re-allow Windows to sleep normally."""
+    global _wake_lock_held
+    if not _wake_lock_held or sys.platform != "win32":
+        return
+    ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS)
+    _wake_lock_held = False
+    console.print("  [dim]Wake lock released — system may sleep[/]")
+    _wake_lock_held = False
+
 
 # Configuration
 _raw_urls = os.environ.get("BACKEND_URL", "http://localhost:8000")
@@ -114,20 +155,18 @@ def _load_pipeline():
     cfg = WAN_CONFIGS["ti2v-5B"]
     cfg.sample_steps = SAMPLE_STEPS
     cfg.frame_num = FRAME_NUM
-    logger.info("Loading Wan TI2V-5B model from %s ...", WAN_MODEL_DIR)
-    logger.info("  Steps: %d, Frames: %d (%.1fs @ %dfps)", SAMPLE_STEPS, FRAME_NUM, FRAME_NUM / cfg.sample_fps, cfg.sample_fps)
 
-    pipeline = WanTI2V(
-        config=cfg,
-        checkpoint_dir=WAN_MODEL_DIR,
-        device_id=0,
-        rank=0,
-        t5_fsdp=False,
-        dit_fsdp=False,
-        use_sp=False,
-        t5_cpu=False,
-    )
-    logger.info("Model loaded successfully.")
+    with console.status("[bold cyan]Loading Wan TI2V-5B model...", spinner="dots"):
+        pipeline = WanTI2V(
+            config=cfg,
+            checkpoint_dir=WAN_MODEL_DIR,
+            device_id=0,
+            rank=0,
+            t5_fsdp=False,
+            dit_fsdp=False,
+            use_sp=False,
+            t5_cpu=False,
+        )
     return pipeline, cfg, SIZE_CONFIGS[SIZE], MAX_AREA_CONFIGS[SIZE]
 
 
@@ -241,52 +280,68 @@ def _fmt_size(nbytes: int) -> str:
     return f"{nbytes / (1024 * 1024):.1f}MB"
 
 
+def _build_stats_table(jobs_completed: int, jobs_failed: int, total_gen_time: float, session_start: float) -> Table:
+    """Build a compact stats bar."""
+    lock_badge = Text(" WAKE LOCK ", style="bold black on bright_yellow") if _wake_lock_held else Text(" SLEEP OK ", style="dim on default")
+    t = Table.grid(padding=(0, 2))
+    t.add_row(
+        lock_badge,
+        Text(f"{jobs_completed}", style="bold green") + Text(" done"),
+        Text(f"{jobs_failed}", style="bold red") + Text(" failed") if jobs_failed else Text(""),
+        Text(f"{_fmt_duration(total_gen_time / jobs_completed)}/clip", style="dim") if jobs_completed else Text(""),
+        Text(f"uptime {_fmt_duration(time.monotonic() - session_start)}", style="dim"),
+    )
+    return t
+
+
 def main():
-    logger.info("=" * 60)
-    logger.info("Animation worker starting")
-    for i, url in enumerate(BACKEND_URLS):
-        logger.info("  Backend %d: %s", i + 1, url)
-    logger.info("  Wan repo:  %s", WAN_REPO)
-    logger.info("  Model dir: %s", WAN_MODEL_DIR)
-    logger.info("=" * 60)
+    # Startup banner
+    grid = Table.grid(padding=(0, 2))
+    grid.add_row("[bold]Backends[/]", ", ".join(f"[cyan]{u}[/]" for u in BACKEND_URLS))
+    grid.add_row("[bold]Model[/]", f"Wan TI2V-5B  [dim]{WAN_MODEL_DIR}[/]")
+    grid.add_row("[bold]Output[/]", f"{SIZE}  {SAMPLE_STEPS} steps  {FRAME_NUM} frames")
+    console.print(Panel(grid, title="[bold magenta]StarlightScribe Animation Worker[/]", border_style="magenta", padding=(1, 2)))
 
     # Load model
     t_load = time.monotonic()
     pipeline, cfg, size_cfg, max_area = _load_pipeline()
-    logger.info("Model ready (loaded in %s)", _fmt_duration(time.monotonic() - t_load))
+    console.print(f"  [green]Model ready[/] [dim]loaded in {_fmt_duration(time.monotonic() - t_load)}[/]\n")
 
     # Start heartbeat thread
     hb = threading.Thread(target=_heartbeat_loop, daemon=True)
     hb.start()
 
-    # Initial heartbeat to all backends
     for url in BACKEND_URLS:
         try:
             _api("post", "/api/worker/heartbeat", url)
-        except Exception as e:
-            logger.warning("Initial heartbeat failed (%s): %s", url, e)
-
-    logger.info("Polling for jobs...")
+        except Exception:
+            pass
 
     # Session stats
     jobs_completed = 0
     jobs_failed = 0
     total_gen_time = 0.0
+    session_start = time.monotonic()
     idle_since = time.monotonic()
 
+    # Idle polling with spinner
     while True:
-        result = _poll()
-        if not result:
-            # Periodic idle status (every 60s instead of every 5s)
-            if time.monotonic() - idle_since > 60:
-                idle_dur = _fmt_duration(time.monotonic() - idle_since)
-                logger.info("Idle for %s | Session: %d done, %d failed", idle_dur, jobs_completed, jobs_failed)
-                idle_since = time.monotonic()
-            time.sleep(POLL_INTERVAL)
-            continue
+        # Idle phase — release wake lock, show spinner
+        _allow_sleep()
+        with console.status("[dim]Waiting for animation jobs...[/]", spinner="dots", spinner_style="cyan") as status:
+            while True:
+                result = _poll()
+                if result:
+                    break
+                if time.monotonic() - idle_since > 60:
+                    idle_dur = _fmt_duration(time.monotonic() - idle_since)
+                    status.update(f"[dim]Waiting for jobs... idle {idle_dur}[/]  [dim]|[/]  [green]{jobs_completed}[/] done  [red]{jobs_failed}[/] failed")
+                time.sleep(POLL_INTERVAL)
 
-        job, backend_url = result
+        # Job received — prevent sleep
+        _keep_awake()
         idle_since = time.monotonic()
+        job, backend_url = result
 
         job_id = job["job_id"]
         slug = job["slug"]
@@ -295,8 +350,13 @@ def main():
         image_url = job["image_url"]
 
         backend_label = backend_url.split("//")[-1]
-        logger.info("-" * 50)
-        logger.info("Job %s: %s/%s [%s]", job_id, slug, image_prefix, backend_label)
+        short_prompt = (prompt[:60] + "...") if len(prompt) > 63 else prompt
+
+        # Job header
+        console.print()
+        console.rule(f"[bold yellow]{slug}[/] / [bold]{image_prefix}[/]", style="yellow")
+        console.print(f"  [dim]job[/] {job_id}  [dim]via[/] {backend_label}")
+        console.print(f"  [dim]prompt[/] [italic]{short_prompt}[/]")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             image_path = os.path.join(tmpdir, f"{image_prefix}.png")
@@ -304,40 +364,88 @@ def main():
 
             # Download source image
             t0 = time.monotonic()
-            if not _download_image(backend_url, image_url, image_path):
+            with console.status("  [cyan]Downloading source image...[/]", spinner="dots"):
+                ok = _download_image(backend_url, image_url, image_path)
+            if not ok:
+                console.print("  [red]Failed to download source image[/]")
                 _upload_result(backend_url, job_id, None, "Failed to download source image")
                 jobs_failed += 1
                 continue
             img_size = os.path.getsize(image_path)
-            logger.info("  Downloaded %s (%s)", image_prefix, _fmt_size(img_size))
+            console.print(f"  [green]Downloaded[/] {_fmt_size(img_size)}")
 
-            # Generate video
+            # Generate video with progress
             try:
                 t_gen = time.monotonic()
-                _generate_video(pipeline, cfg, size_cfg, max_area, image_path, output_path, prompt)
+
+                progress = Progress(
+                    SpinnerColumn("dots", style="magenta"),
+                    TextColumn("[bold cyan]Generating"),
+                    BarColumn(bar_width=30, style="bar.back", complete_style="magenta", finished_style="green"),
+                    TaskProgressColumn(),
+                    TextColumn("[dim]elapsed[/]"),
+                    TimeElapsedColumn(),
+                    console=console,
+                    transient=True,
+                )
+                gen_task = progress.add_task("gen", total=cfg.sample_steps)
+
+                # Run generation in a thread so we can animate the progress bar
+                gen_error = [None]
+                def _run_gen():
+                    try:
+                        _generate_video(pipeline, cfg, size_cfg, max_area, image_path, output_path, prompt)
+                    except Exception as e:
+                        gen_error[0] = e
+
+                gen_thread = threading.Thread(target=_run_gen)
+
+                with progress:
+                    gen_thread.start()
+                    while gen_thread.is_alive():
+                        # Estimate progress from elapsed time vs average
+                        elapsed = time.monotonic() - t_gen
+                        if jobs_completed > 0:
+                            avg = total_gen_time / jobs_completed
+                            est = min(elapsed / avg, 0.95) * cfg.sample_steps
+                        else:
+                            # First job — assume ~3min, ramp up smoothly
+                            est = min(elapsed / 180, 0.95) * cfg.sample_steps
+                        progress.update(gen_task, completed=int(est))
+                        time.sleep(0.5)
+                    progress.update(gen_task, completed=cfg.sample_steps)
+
+                if gen_error[0]:
+                    raise gen_error[0]
+
                 gen_dur = time.monotonic() - t_gen
                 total_gen_time += gen_dur
-
                 vid_size = os.path.getsize(output_path) if os.path.exists(output_path) else 0
-                logger.info("  Generated in %s (%s)", _fmt_duration(gen_dur), _fmt_size(vid_size))
+                console.print(f"  [green]Generated[/] {_fmt_size(vid_size)} in {_fmt_duration(gen_dur)}")
 
-                t_up = time.monotonic()
-                _upload_result(backend_url, job_id, output_path, None)
-                up_dur = time.monotonic() - t_up
-                logger.info("  Uploaded in %s", _fmt_duration(up_dur))
+                # Upload
+                with console.status("  [cyan]Uploading video...[/]", spinner="dots"):
+                    t_up = time.monotonic()
+                    _upload_result(backend_url, job_id, output_path, None)
+                    up_dur = time.monotonic() - t_up
+                console.print(f"  [green]Uploaded[/] in {_fmt_duration(up_dur)}")
 
-                total_dur = time.monotonic() - t0
                 jobs_completed += 1
-                avg = total_gen_time / jobs_completed
+                total_dur = time.monotonic() - t0
+                console.print(f"  [bold green]Done[/] in {_fmt_duration(total_dur)}")
+                console.print(_build_stats_table(jobs_completed, jobs_failed, total_gen_time, session_start))
 
-                logger.info("  Done: %s total | Session: %d/%d done (avg %s/clip)",
-                            _fmt_duration(total_dur), jobs_completed,
-                            jobs_completed + jobs_failed, _fmt_duration(avg))
             except Exception as e:
-                logger.error("  FAILED: %s", e, exc_info=True)
+                console.print(f"  [bold red]Failed:[/] {e}")
                 _upload_result(backend_url, job_id, None, str(e))
                 jobs_failed += 1
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        _allow_sleep()
+        console.print("\n  [bold yellow]Interrupted[/] — shutting down gracefully")
+        console.print("  [dim]Wake lock released, GPU idle[/]\n")
+        sys.exit(0)
