@@ -67,6 +67,42 @@ from rich.text import Text
 
 warnings.filterwarnings("ignore")
 
+# Intercept tqdm to suppress visual output and capture step progress
+# Wan's diffusion loop does `for _, t in enumerate(tqdm(timesteps))` —
+# we monkey-patch tqdm to silently count steps for our Rich progress bar.
+_step_progress: dict = {"current": 0, "total": 0}
+
+import tqdm as _tqdm_module
+_OriginalTqdm = _tqdm_module.tqdm
+
+class _SilentTqdm(_OriginalTqdm):
+    """tqdm subclass that suppresses all output but tracks iteration counts.
+
+    Wan uses `for _, t in enumerate(tqdm(timesteps))` — iteration-based,
+    not update()-based. We override __iter__ to count yielded items.
+    """
+
+    def __init__(self, *args, **kwargs):
+        kwargs["disable"] = True
+        super().__init__(*args, **kwargs)
+        if self.total:
+            _step_progress["current"] = 0
+            _step_progress["total"] = self.total
+
+    def __iter__(self):
+        _step_progress["current"] = 0
+        for i, item in enumerate(self.iterable):
+            _step_progress["current"] = i + 1
+            yield item
+
+_tqdm_module.tqdm = _SilentTqdm
+# Also patch tqdm.auto (used by transformers/diffusers during model loading)
+try:
+    import tqdm.auto as _tqdm_auto
+    _tqdm_auto.tqdm = _SilentTqdm
+except ImportError:
+    pass
+
 # Suppress noisy loggers — we use rich for output
 logging.basicConfig(level=logging.WARNING, format="%(message)s")
 for _quiet in ("urllib3", "requests", "torch", "transformers", "diffusers", "fontTools", "PIL"):
@@ -323,6 +359,7 @@ def main():
     total_gen_time = 0.0
     session_start = time.monotonic()
     idle_since = time.monotonic()
+    recent_decode_times: list[float] = []  # rolling window of last 5 VAE decode durations
 
     # Idle polling with spinner
     while True:
@@ -378,19 +415,10 @@ def main():
             try:
                 t_gen = time.monotonic()
 
-                progress = Progress(
-                    SpinnerColumn("dots", style="magenta"),
-                    TextColumn("[bold cyan]Generating"),
-                    BarColumn(bar_width=30, style="bar.back", complete_style="magenta", finished_style="green"),
-                    TaskProgressColumn(),
-                    TextColumn("[dim]elapsed[/]"),
-                    TimeElapsedColumn(),
-                    console=console,
-                    transient=True,
-                )
-                gen_task = progress.add_task("gen", total=cfg.sample_steps)
+                _step_progress["current"] = 0
+                _step_progress["total"] = cfg.sample_steps
 
-                # Run generation in a thread so we can animate the progress bar
+                # Run generation in a thread so we can show live progress
                 gen_error = [None]
                 def _run_gen():
                     try:
@@ -400,20 +428,61 @@ def main():
 
                 gen_thread = threading.Thread(target=_run_gen)
 
+                # Phase 1: Diffusion steps (tracked progress bar)
+                progress = Progress(
+                    SpinnerColumn("dots", style="magenta"),
+                    TextColumn("[bold cyan]Diffusing"),
+                    BarColumn(bar_width=40, style="bar.back", complete_style="magenta", finished_style="green"),
+                    TaskProgressColumn(),
+                    TimeElapsedColumn(),
+                    console=console,
+                    transient=True,
+                )
+                gen_task = progress.add_task("gen", total=cfg.sample_steps)
+
+                gen_thread.start()
                 with progress:
-                    gen_thread.start()
                     while gen_thread.is_alive():
-                        # Estimate progress from elapsed time vs average
-                        elapsed = time.monotonic() - t_gen
-                        if jobs_completed > 0:
-                            avg = total_gen_time / jobs_completed
-                            est = min(elapsed / avg, 0.95) * cfg.sample_steps
-                        else:
-                            # First job — assume ~3min, ramp up smoothly
-                            est = min(elapsed / 180, 0.95) * cfg.sample_steps
-                        progress.update(gen_task, completed=int(est))
-                        time.sleep(0.5)
+                        step = _step_progress["current"]
+                        progress.update(gen_task, completed=min(step, cfg.sample_steps))
+                        if step >= cfg.sample_steps:
+                            break
+                        time.sleep(0.3)
                     progress.update(gen_task, completed=cfg.sample_steps)
+
+                # Phase 2: VAE decode + MP4 save
+                t_decode = time.monotonic()
+                if gen_thread.is_alive():
+                    avg_decode = sum(recent_decode_times) / len(recent_decode_times) if recent_decode_times else 0
+                    if avg_decode > 0:
+                        # Estimated progress bar based on moving average
+                        decode_progress = Progress(
+                            SpinnerColumn("dots", style="yellow"),
+                            TextColumn("[bold yellow]Decoding"),
+                            BarColumn(bar_width=40, style="bar.back", complete_style="yellow", finished_style="green"),
+                            TaskProgressColumn(),
+                            TimeElapsedColumn(),
+                            console=console,
+                            transient=True,
+                        )
+                        # Use 100 as abstract total, advance by elapsed/estimate ratio
+                        decode_task = decode_progress.add_task("decode", total=100)
+                        with decode_progress:
+                            while gen_thread.is_alive():
+                                elapsed = time.monotonic() - t_decode
+                                est_pct = min(elapsed / avg_decode, 0.97) * 100
+                                decode_progress.update(decode_task, completed=int(est_pct))
+                                time.sleep(0.3)
+                            decode_progress.update(decode_task, completed=100)
+                    else:
+                        # No history yet — just show a spinner
+                        with console.status("  [bold yellow]Decoding frames + saving MP4...", spinner="dots"):
+                            gen_thread.join()
+
+                decode_dur = time.monotonic() - t_decode
+                recent_decode_times.append(decode_dur)
+                if len(recent_decode_times) > 5:
+                    recent_decode_times.pop(0)
 
                 if gen_error[0]:
                     raise gen_error[0]

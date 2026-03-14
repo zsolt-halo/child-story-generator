@@ -8,6 +8,12 @@ interface ImageStatus {
   skipped: boolean;
 }
 
+interface VideoStatus {
+  page: number;
+  url: string;
+  skipped: boolean;
+}
+
 interface PipelineState {
   taskId: string | null;
   phase: string | null;
@@ -18,6 +24,10 @@ interface PipelineState {
   images: ImageStatus[];
   imageProgress: number;
   imageTotal: number;
+  videos: VideoStatus[];
+  videoProgress: number;
+  videoTotal: number;
+  isAnimationPipeline: boolean;
   resultSlug: string | null;
   resultTitle: string | null;
   castMembers: CastMember[];
@@ -67,6 +77,10 @@ const initialState = {
   images: [] as ImageStatus[],
   imageProgress: 0,
   imageTotal: 0,
+  videos: [] as VideoStatus[],
+  videoProgress: 0,
+  videoTotal: 0,
+  isAnimationPipeline: false,
   resultSlug: null,
   resultTitle: null,
   castMembers: [] as CastMember[],
@@ -97,15 +111,19 @@ export const usePipelineStore = create<PipelineState>((set) => ({
             queuePosition: event.position ?? 0,
             queueAhead: event.queue_ahead ?? 0,
           };
-        case "phase_start":
+        case "phase_start": {
+          const isAnim = event.phase === "animation" || state.isAnimationPipeline;
           return {
             phase: event.phase ?? null,
             phaseMessage: event.message ?? null,
             imageTotal: event.data?.total as number ?? state.imageTotal,
+            videoTotal: isAnim ? (event.data?.total as number ?? state.videoTotal) : state.videoTotal,
+            isAnimationPipeline: isAnim,
             phaseStartTime: Date.now(),
             queuePosition: 0,
             queueAhead: 0,
           };
+        }
         case "phase_complete": {
           const phase = event.phase;
           const startTime = state.phaseStartTime;
@@ -144,6 +162,19 @@ export const usePipelineStore = create<PipelineState>((set) => ({
             ],
             imageProgress: event.progress ?? state.imageProgress,
             imageTotal: event.total ?? state.imageTotal,
+          };
+        case "video_complete":
+          return {
+            videos: [
+              ...state.videos,
+              {
+                page: event.page!,
+                url: event.url!,
+                skipped: event.skipped ?? false,
+              },
+            ],
+            videoProgress: event.progress ?? state.videoProgress,
+            videoTotal: event.total ?? state.videoTotal,
           };
         case "cast_ref_complete":
           return {

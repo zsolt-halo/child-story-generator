@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { usePipelineStore } from "../stores/pipelineStore";
 import { PipelineTimeline } from "../components/PipelineTimeline";
 import { UnifiedReviewPanel } from "../components/UnifiedReviewPanel";
+import { AnimationProgress } from "../components/AnimationProgress";
 import { updateStory, approvePipeline, getPhaseAverages, getStory } from "../api/client";
 import { FadeImage } from "../components/FadeImage";
 import type { CastMember } from "../api/types";
@@ -22,6 +23,7 @@ export function Pipeline() {
     queuePosition, queueAhead,
     phaseData, phaseElapsed, phaseStartTime,
     resultTitle,
+    isAnimationPipeline,
     setTaskId, restoreState,
   } = usePipelineStore();
   const [approving, setApproving] = useState(false);
@@ -98,13 +100,13 @@ export function Pipeline() {
 
   // Navigate to workspace on completion
   useEffect(() => {
-    if (completed && resultSlug && !waitingForReview && !waitingForStoryReview && !waitingForCastReview && !waitingForCoverSelection) {
+    if (completed && resultSlug && !waitingForReview && !waitingForStoryReview && !waitingForCastReview && !waitingForCoverSelection && !isAnimationPipeline) {
       const timer = setTimeout(() => {
         navigate(`/stories/${resultSlug}?tab=illustrations`);
       }, 3500);
       return () => clearTimeout(timer);
     }
-  }, [completed, resultSlug, waitingForReview, waitingForStoryReview, waitingForCastReview, waitingForCoverSelection, navigate]);
+  }, [completed, resultSlug, waitingForReview, waitingForStoryReview, waitingForCastReview, waitingForCoverSelection, isAnimationPipeline, navigate]);
 
   const handleApprove = useCallback(async (choice: number, castEdited: boolean, cast: CastMember[]) => {
     if (!resultSlug) return;
@@ -138,6 +140,11 @@ export function Pipeline() {
 
   const isRecovering = !taskId && !hasRestoredState && !!routeSlug;
   const isWideLayout = isWaiting;
+
+  // Animation pipeline — show dedicated animation progress view
+  if (isAnimationPipeline && routeSlug) {
+    return <AnimationProgress slug={routeSlug} />;
+  }
 
   return (
     <div className={`mx-auto ${isWideLayout ? "max-w-5xl" : "max-w-3xl"}`}>
