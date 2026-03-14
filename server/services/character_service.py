@@ -10,6 +10,21 @@ from src.db.character_repository import CharacterRepository
 logger = logging.getLogger(__name__)
 _repo = CharacterRepository()
 
+# Templates use slug for file paths (no UUID). Custom characters use UUID.
+CHARACTERS_ASSETS = "stories/.characters"
+
+
+def _custom_char_dir(char_id: str | uuid.UUID) -> "Path":
+    """Return the on-disk asset directory for a custom (DB) character, keyed by UUID."""
+    from pathlib import Path
+    return Path(f"{CHARACTERS_ASSETS}/{char_id}")
+
+
+def _template_char_dir(slug: str) -> "Path":
+    """Return the on-disk asset directory for a TOML template character, keyed by slug."""
+    from pathlib import Path
+    return Path(f"{CHARACTERS_ASSETS}/{slug}")
+
 
 def _row_to_dict(row) -> dict:
     """Convert a CharacterRow to an API-friendly dict."""
@@ -34,17 +49,18 @@ def _row_to_dict(row) -> dict:
         "is_template": False,
         "pipeline_id": f"custom:{row.id}",
         "reference_sheet_url": f"/api/characters/{row.id}/reference-sheet" if row.has_reference_sheet else None,
+        "has_photo": bool(row.photo_path),
+        "photo_url": f"/api/characters/{row.id}/photo" if row.photo_path else None,
     }
 
 
 def _toml_to_dict(slug: str, char: Character) -> dict:
     """Convert a TOML-loaded Character to an API-friendly dict."""
-    from pathlib import Path
-
     d = char.model_dump()
-    ref_sheet_path = Path(f"stories/.characters/{slug}/reference_sheet.png")
+    ref_sheet_path = _template_char_dir(slug) / "reference_sheet.png"
     ref_url = f"/api/characters/template/{slug}/reference-sheet" if ref_sheet_path.exists() else None
-    d.update(id=None, slug=slug, is_template=True, pipeline_id=slug, reference_sheet_url=ref_url)
+    d.update(id=None, slug=slug, is_template=True, pipeline_id=slug, reference_sheet_url=ref_url,
+             has_photo=False, photo_url=None)
     return d
 
 
@@ -62,9 +78,12 @@ async def list_all_characters() -> list[dict]:
                 continue
 
     # DB custom characters
-    db_rows = await _repo.async_list_all()
-    for row in db_rows:
-        results.append(_row_to_dict(row))
+    try:
+        db_rows = await _repo.async_list_all()
+        for row in db_rows:
+            results.append(_row_to_dict(row))
+    except Exception:
+        logger.warning("Failed to load custom characters from DB", exc_info=True)
 
     return results
 
@@ -140,6 +159,15 @@ async def delete_character(id: str) -> None:
             raise ValueError(
                 f"Cannot delete: character is used by story '{referencing}'"
             )
+
+    # Clean up files on disk before deleting the DB row
+    try:
+        import shutil
+        char_dir = _custom_char_dir(id)
+        if char_dir.exists():
+            shutil.rmtree(char_dir)
+    except Exception:
+        logger.warning("Failed to clean up character files for %s", id, exc_info=True)
 
     await _repo.async_delete(uuid.UUID(id))
 
@@ -225,12 +253,32 @@ async def generate_character_reference_sheet(task_id: str, identifier: str, slug
 
     character = await async_resolve_character(identifier)
 
-    output_dir = Path(f"stories/.characters/{slug}")
+    # Load photo if available (for photo-based ref sheet generation)
+    photo_bytes = None
+    if identifier.startswith("custom:"):
+        char_id = identifier.removeprefix("custom:")
+        row = await _repo.async_get_by_id(uuid.UUID(char_id))
+        if row.photo_path:
+            photo_file = Path(row.photo_path)
+            if photo_file.exists():
+                photo_bytes = await asyncio.to_thread(photo_file.read_bytes)
+
+    # Custom characters use UUID for file paths; templates use slug
+    if identifier.startswith("custom:"):
+        output_dir = _custom_char_dir(identifier.removeprefix("custom:"))
+    else:
+        output_dir = _template_char_dir(slug)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Delete existing ref sheet so generation isn't skipped (resume-safe check)
+    for old_file in ("reference_sheet.png", "reference_sheet_raw.png"):
+        old_path = output_dir / old_file
+        if old_path.exists():
+            old_path.unlink()
 
     config = BookConfig()
     await asyncio.to_thread(
-        generate_reference_sheet, character, "digital illustration", config, output_dir
+        generate_reference_sheet, character, "digital illustration", config, output_dir, photo=photo_bytes
     )
 
     # Update DB flag for custom characters

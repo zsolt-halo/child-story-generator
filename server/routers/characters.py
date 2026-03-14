@@ -2,7 +2,7 @@ import asyncio
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 
 from server.schemas import (
@@ -106,7 +106,7 @@ async def polish_character(req: CharacterPolishRequest):
 @router.get("/template/{slug}/reference-sheet")
 async def serve_template_reference_sheet(slug: str, w: int | None = Query(None)):
     """Serve the reference sheet image for a TOML template character."""
-    file_path = Path(f"stories/.characters/{slug}/reference_sheet.png")
+    file_path = character_service._template_char_dir(slug) / "reference_sheet.png"
     if not file_path.exists():
         raise HTTPException(404, "Reference sheet not found")
 
@@ -134,7 +134,7 @@ async def serve_reference_sheet(id: str, w: int | None = Query(None)):
     except (FileNotFoundError, ValueError):
         raise HTTPException(404, "Character not found")
 
-    file_path = Path(f"stories/.characters/{row.slug}/reference_sheet.png")
+    file_path = character_service._custom_char_dir(row.id) / "reference_sheet.png"
     if not file_path.exists():
         raise HTTPException(404, "Reference sheet not found")
 
@@ -150,6 +150,94 @@ async def serve_reference_sheet(id: str, w: int | None = Query(None)):
         await asyncio.to_thread(_generate_thumbnail, file_path, thumb_path, width)
 
     return FileResponse(thumb_path, media_type="image/jpeg")
+
+
+@router.post("/{id}/photo", response_model=CharacterDetail)
+async def upload_photo(id: str, file: UploadFile = File(...)):
+    """Upload a reference photo for a custom character."""
+    from src.db.character_repository import CharacterRepository
+
+    try:
+        row = await CharacterRepository().async_get_by_id(uuid.UUID(id))
+    except (FileNotFoundError, ValueError):
+        raise HTTPException(404, "Character not found")
+
+    # Validate file type
+    if file.content_type not in ("image/png", "image/jpeg", "image/webp"):
+        raise HTTPException(400, "Only PNG, JPEG, and WebP images are supported")
+
+    # Save photo to character directory (UUID-based path)
+    photo_dir = character_service._custom_char_dir(row.id)
+    photo_dir.mkdir(parents=True, exist_ok=True)
+    photo_path = photo_dir / "photo.png"
+
+    # Convert to PNG via Pillow for consistency
+    from PIL import Image
+    import io
+    contents = await file.read()
+    img = Image.open(io.BytesIO(contents))
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+    img.save(photo_path, format="PNG")
+
+    # Update DB
+    await CharacterRepository().async_set_photo_path(uuid.UUID(id), str(photo_path))
+
+    return await character_service.get_character(id)
+
+
+@router.get("/{id}/photo")
+async def serve_photo(id: str, w: int | None = Query(None)):
+    """Serve the reference photo for a custom character."""
+    from src.db.character_repository import CharacterRepository
+
+    try:
+        row = await CharacterRepository().async_get_by_id(uuid.UUID(id))
+    except (FileNotFoundError, ValueError):
+        raise HTTPException(404, "Character not found")
+
+    if not row.photo_path:
+        raise HTTPException(404, "No photo uploaded")
+
+    file_path = Path(row.photo_path)
+    if not file_path.exists():
+        raise HTTPException(404, "Photo file not found")
+
+    if w is None:
+        return FileResponse(file_path, media_type="image/png")
+
+    width = min(ALLOWED_WIDTHS, key=lambda x: abs(x - w))
+    thumbs_dir = file_path.parent / ".thumbs"
+    thumb_path = thumbs_dir / f"photo_w{width}.jpg"
+
+    if not thumb_path.exists():
+        thumbs_dir.mkdir(exist_ok=True)
+        await asyncio.to_thread(_generate_thumbnail, file_path, thumb_path, width)
+
+    return FileResponse(thumb_path, media_type="image/jpeg")
+
+
+@router.delete("/{id}/photo", status_code=204)
+async def delete_photo(id: str):
+    """Remove the reference photo from a custom character."""
+    from src.db.character_repository import CharacterRepository
+
+    try:
+        row = await CharacterRepository().async_get_by_id(uuid.UUID(id))
+    except (FileNotFoundError, ValueError):
+        raise HTTPException(404, "Character not found")
+
+    if row.photo_path:
+        photo_file = Path(row.photo_path)
+        if photo_file.exists():
+            photo_file.unlink()
+        # Clean up thumbnails
+        thumbs_dir = photo_file.parent / ".thumbs"
+        if thumbs_dir.exists():
+            for f in thumbs_dir.glob("photo_w*"):
+                f.unlink()
+
+    await CharacterRepository().async_set_photo_path(uuid.UUID(id), None)
 
 
 @router.post("/{identifier}/generate-reference-sheet", response_model=TaskResponse)

@@ -2,6 +2,34 @@ import { Link } from "react-router-dom";
 import type { StoryListItem } from "../api/types";
 import { FadeImage } from "./FadeImage";
 
+function StardustStrip({ animated, total }: { animated: number; total: number }) {
+  if (total === 0) return null;
+  const full = animated >= total;
+
+  return (
+    <div className="flex items-center gap-1 mt-1.5">
+      <div className={`flex gap-[3px] ${full ? "stardust-shimmer" : ""}`}>
+        {Array.from({ length: total }, (_, i) => {
+          const isAnimated = i < animated;
+          return (
+            <span
+              key={i}
+              className={`block rounded-full transition-all duration-300 ${
+                isAnimated
+                  ? "w-[5px] h-[5px] bg-amber-300 shadow-[0_0_4px_rgba(251,191,36,0.6)]"
+                  : "w-[4px] h-[4px] bg-white/30"
+              }`}
+            />
+          );
+        })}
+      </div>
+      <span className="text-[9px] text-white/50 ml-0.5 tabular-nums">
+        {animated}/{total}
+      </span>
+    </div>
+  );
+}
+
 export function StoryCard({ story, onDelete }: { story: StoryListItem; onDelete?: () => void }) {
   const isPaused = story.pipeline_status === "story_review" || story.pipeline_status === "cast_review";
   const linkTo = isPaused
@@ -9,6 +37,9 @@ export function StoryCard({ story, onDelete }: { story: StoryListItem; onDelete?
     : story.has_images
       ? `/stories/${story.slug}?tab=illustrations`
       : `/stories/${story.slug}?tab=pages`;
+
+  const animatedCount = story.animated_count ?? 0;
+  const showStardust = story.has_images && animatedCount > 0;
 
   return (
     <Link
@@ -70,6 +101,9 @@ export function StoryCard({ story, onDelete }: { story: StoryListItem; onDelete?
           </h3>
           {story.title_translated && (
             <p className="text-[11px] text-white/70 mt-0.5 truncate">{story.title_translated}</p>
+          )}
+          {showStardust && (
+            <StardustStrip animated={animatedCount} total={story.page_count} />
           )}
         </div>
 

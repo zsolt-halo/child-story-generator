@@ -21,6 +21,26 @@ from server.services.task_manager import task_manager
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("starlight.pipeline")
 
+
+async def _load_character_photo(character_id: str) -> bytes | None:
+    """Load photo bytes for a custom character, if available."""
+    if not character_id.startswith("custom:"):
+        logger.debug("Not a custom character (%s), skipping photo load", character_id)
+        return None
+    char_uuid = character_id.removeprefix("custom:")
+    from src.db.character_repository import CharacterRepository
+    row = await CharacterRepository().async_get_by_id(uuid.UUID(char_uuid))
+    if not row.photo_path:
+        logger.info("Character %s has no photo_path in DB", character_id)
+        return None
+    photo_file = Path(row.photo_path)
+    if not photo_file.exists():
+        logger.warning("Character %s photo_path=%s but file does not exist!", character_id, row.photo_path)
+        return None
+    data = await asyncio.to_thread(photo_file.read_bytes)
+    logger.info("Loaded photo for %s: %d bytes from %s", character_id, len(data), row.photo_path)
+    return data
+
 # Background task refs to prevent GC of fire-and-forget coroutines
 _background_tasks: set[asyncio.Task] = set()
 
@@ -321,8 +341,9 @@ async def run_full_pipeline(
     )
     images_dir = output_dir / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
+    photo_bytes = await _load_character_photo(character)
     async with _phase(task_id, "reference_sheet", "Generating character reference sheet...") as r:
-        ref_path = await asyncio.to_thread(generate_reference_sheet, char, style_anchor, config, images_dir)
+        ref_path = await asyncio.to_thread(generate_reference_sheet, char, style_anchor, config, images_dir, photo_bytes)
         r.update(generated=ref_path is not None, url=f"/api/stories/{slug}/images/reference_sheet.png" if ref_path else None)
 
     # Phase 2d: Cast reference sheets
@@ -445,8 +466,9 @@ async def run_auto_pipeline(
     )
     images_dir = output_dir / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
+    photo_bytes = await _load_character_photo(character)
     async with _phase(task_id, "reference_sheet", "Generating character reference sheet...") as r:
-        ref_path = await asyncio.to_thread(generate_reference_sheet, char, style_anchor, config, images_dir)
+        ref_path = await asyncio.to_thread(generate_reference_sheet, char, style_anchor, config, images_dir, photo_bytes)
         r.update(generated=ref_path is not None, url=f"/api/stories/{slug}/images/reference_sheet.png" if ref_path else None)
 
     # Phase 2d: Cast reference sheets
@@ -559,11 +581,12 @@ async def run_story_only(
     )
     images_dir = output_dir / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
+    photo_bytes = await _load_character_photo(character)
 
     ref_url = None
     async with _phase(task_id, "reference_sheet", "Generating main character reference sheet...") as r:
         ref_path = await asyncio.to_thread(
-            generate_reference_sheet, char, style_anchor, config, images_dir,
+            generate_reference_sheet, char, style_anchor, config, images_dir, photo_bytes,
         )
         ref_url = f"/api/stories/{slug}/images/reference_sheet.png" if ref_path else None
         r.update(generated=ref_path is not None, url=ref_url)
@@ -651,11 +674,12 @@ async def run_cast_extraction(task_id: str, slug: str) -> dict:
     )
     images_dir = ctx.story_dir / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
+    photo_bytes = await _load_character_photo(ctx.config.character)
 
     ref_url = None
     async with _phase(task_id, "reference_sheet", "Generating main character reference sheet...") as r:
         ref_path = await asyncio.to_thread(
-            generate_reference_sheet, ctx.char, ctx.style_anchor, ctx.config, images_dir,
+            generate_reference_sheet, ctx.char, ctx.style_anchor, ctx.config, images_dir, photo_bytes,
         )
         ref_url = f"/api/stories/{slug}/images/reference_sheet.png" if ref_path else None
         r.update(generated=ref_path is not None, url=ref_url)

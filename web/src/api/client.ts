@@ -30,6 +30,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const body = await res.text();
     throw new Error(`API error ${res.status}: ${body}`);
   }
+  if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
 
@@ -118,6 +119,23 @@ export const polishCharacter = (data: CharacterPolishRequest) =>
   request<CharacterPolishResponse>("/characters/polish", { method: "POST", body: JSON.stringify(data) });
 export const generateCharacterRefSheet = (identifier: string) =>
   request<TaskResponse>(`/characters/${identifier}/generate-reference-sheet`, { method: "POST" });
+
+export const uploadCharacterPhoto = async (id: string, file: File): Promise<CharacterDetail> => {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(`${BASE}/characters/${id}/photo`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`API error ${res.status}: ${body}`);
+  }
+  return res.json() as Promise<CharacterDetail>;
+};
+
+export const deleteCharacterPhoto = (id: string) =>
+  request(`/characters/${id}/photo`, { method: "DELETE" });
 
 // Presets
 export const listPresets = () => request<PresetDetail[]>("/presets/");

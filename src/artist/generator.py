@@ -31,6 +31,14 @@ RETRY_DELAY = 10.0
 MAX_RETRIES = 5
 
 
+def _format_color_palette(colors: list[str]) -> str:
+    """Format a color palette list into a prompt instruction string."""
+    if not colors:
+        return ""
+    return (f" Use this color palette for the character's clothing and accessories: "
+            f"{', '.join(colors)}.")
+
+
 def build_image_prompt(
     keyframe: Keyframe, character: Character, style_anchor: str, title: str = "",
     cast: list[CastMember] | None = None,
@@ -99,6 +107,54 @@ def _extract_image_bytes(response) -> bytes | None:
     return None
 
 
+def _generate_image_from_photo(
+    client: genai.Client,
+    prompt: str,
+    model: str,
+    photo_bytes: bytes,
+    output_path: Path,
+) -> Path:
+    """Generate an image using a reference photo via the chat API.
+
+    The chat API + PIL Image is the documented way to do image-to-image with
+    gemini-2.5-flash-image.  ``generate_content`` with ``Part.from_bytes`` does
+    NOT reliably honour the reference photo.
+    """
+    pil_image = Image.open(io.BytesIO(photo_bytes))
+    if pil_image.mode != "RGB":
+        pil_image = pil_image.convert("RGB")
+
+    for attempt in range(MAX_RETRIES):
+        try:
+            chat = client.chats.create(
+                model=model,
+                config=types.GenerateContentConfig(
+                    response_modalities=["IMAGE"],
+                ),
+            )
+            response = chat.send_message([prompt, pil_image])
+            image_data = _extract_image_bytes(response)
+            if not image_data:
+                raise RuntimeError("No image data in response")
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(image_data)
+            logger.info("Photo-based image saved: %s (%d KB)", output_path.name, len(image_data) // 1024)
+            _record_image_result("success", model)
+            return output_path
+        except Exception as e:
+            if attempt < MAX_RETRIES - 1:
+                delay = RETRY_DELAY * (2 ** attempt)
+                logger.warning(
+                    "Photo image gen attempt %d/%d failed: %s — retrying in %.0fs",
+                    attempt + 1, MAX_RETRIES, e, delay,
+                )
+                time.sleep(delay)
+            else:
+                _record_image_result("failure", model)
+                raise RuntimeError(f"Photo image generation failed after {MAX_RETRIES} attempts: {e}") from e
+    raise RuntimeError("Unreachable")
+
+
 def _generate_image(
     client: genai.Client,
     prompt: str,
@@ -109,13 +165,13 @@ def _generate_image(
     """Generate image via Gemini generate_content API (supports multimodal reference input)."""
     has_refs = reference_image is not None or additional_references
     if has_refs:
-        contents: list = []
+        # Put prompt first so model reads instructions before seeing images
+        contents: list = [prompt]
         if reference_image is not None:
             contents.append(types.Part.from_bytes(data=reference_image, mime_type="image/png"))
         if additional_references:
             for ref in additional_references:
                 contents.append(types.Part.from_bytes(data=ref, mime_type="image/png"))
-        contents.append(prompt)
     else:
         contents = prompt
 
@@ -201,11 +257,15 @@ def generate_reference_sheet(
     style_anchor: str,
     config: BookConfig,
     output_dir: Path,
+    photo: bytes | None = None,
 ) -> Path | None:
     """Generate a character reference/model sheet for visual consistency.
 
     Returns the path to the saved reference sheet, or None if generation fails.
     Skips generation if the file already exists (resume-safe).
+
+    When `photo` is provided, uses the best available model to create a cartoon
+    version of the real person in the photo.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     final_path = output_dir / "reference_sheet.png"
@@ -214,27 +274,76 @@ def generate_reference_sheet(
         logger.debug("Reference sheet already exists, skipping")
         return final_path
 
-    species = _infer_species(character)
-    anatomy_note = get_anatomy_note(species)
-    prompt = (
-        f"Character model sheet / reference sheet for a children's book character. "
-        f"Show the character in multiple poses: front view, three-quarter view, side view, "
-        f"plus 2-3 facial expressions (happy, surprised, thoughtful). "
-        f"Clean white background, no other characters, no scenery. "
-        f"Character: {character.visual.description}. "
-        f"Visual constants: {character.visual.constants}. "
-        f"Art style: {style_anchor}. "
-        f"Professional character turnaround sheet for animation/illustration reference. "
-        f"Square format."
+    logger.info(
+        "Reference sheet for %s: photo=%s (%d bytes), visual.description=%s",
+        character.name,
+        "YES" if photo else "NO",
+        len(photo) if photo else 0,
+        character.visual.description[:80] if character.visual.description else "(empty)",
     )
-    if anatomy_note:
-        prompt += f" {anatomy_note}"
+
+    if photo:
+        # Photo-based: use chat API with PIL Image so Gemini actually sees the reference.
+        # generate_content with Part.from_bytes ignores the photo; the chat API + PIL Image
+        # pattern (from the google-genai docs) is the supported way to do image-to-image.
+        logger.info("Photo-based ref sheet: %d bytes for %s", len(photo), character.name)
+        constants_note = f" They always wear/have: {character.visual.constants}." if character.visual.constants else ""
+        color_note = _format_color_palette(character.visual.color_palette)
+        prompt = (
+            f"This photo shows a real child named {character.name}. "
+            f"Create a CHARACTER MODEL SHEET for a children's picture book based on this photo. "
+            f"{character.name} is a HUMAN CHILD — do NOT draw an animal, creature, or anything non-human. "
+            f"Carefully match their exact hair color, hairstyle, eye color, skin tone, face shape, "
+            f"and any distinctive features from the photo. "
+            f"Draw {character.name} as a warm, appealing {style_anchor} cartoon — stylized but "
+            f"unmistakably the same child from the photo. "
+            f"Show multiple poses: front view, three-quarter view, side view, "
+            f"and 2-3 expressions (happy, surprised, thoughtful). "
+            f"Clean white background. No other characters. No scenery. No animals."
+            f"{constants_note}{color_note} "
+            f"Art style: {style_anchor}. Square format."
+        )
+        model = config.image_model
+
+        try:
+            raw_path = output_dir / "reference_sheet_raw.png"
+            _generate_image_from_photo(
+                create_image_client(config), prompt, model, photo, raw_path,
+            )
+            upscale_for_print(raw_path, final_path)
+            return final_path
+        except Exception:
+            logger.warning("Photo-based reference sheet generation failed", exc_info=True)
+            return None
+    else:
+        species = _infer_species(character)
+        anatomy_note = get_anatomy_note(species)
+        prompt = (
+            f"Character model sheet / reference sheet for a children's book character "
+            f"named {character.name}. "
+            f"Show the character in multiple poses: front view, three-quarter view, side view, "
+            f"plus 2-3 facial expressions (happy, surprised, thoughtful). "
+            f"Clean white background, no other characters, no scenery. "
+            f"Character: {character.visual.description}. "
+            f"Visual constants: {character.visual.constants}. "
+            f"Art style: {style_anchor}. "
+            f"Professional character turnaround sheet for animation/illustration reference. "
+            f"Title the sheet '{character.name.upper()} — CHARACTER REFERENCE'. "
+            f"Square format."
+        )
+        prompt += _format_color_palette(character.visual.color_palette)
+        if anatomy_note:
+            prompt += f" {anatomy_note}"
+        model = config.image_model
 
     try:
-        logger.info("Generating reference sheet for %s", character.name)
+        logger.info("Generating reference sheet for %s (model=%s, photo=%s)",
+                     character.name, model, "yes" if photo else "no")
         client = create_image_client(config)
         raw_path = output_dir / "reference_sheet_raw.png"
-        generate_single_image(client, prompt, config.image_model, raw_path)
+        generate_single_image(
+            client, prompt, model, raw_path,
+        )
         upscale_for_print(raw_path, final_path)
         return final_path
     except Exception:

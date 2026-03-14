@@ -15,6 +15,7 @@ class StoryListItem(BaseModel):
     has_images: bool
     has_pdf: bool
     has_video: bool = False
+    animated_count: int = 0
     cover_url: str | None = None
     created_at: str | None = None
     title_translated: str | None = None
@@ -162,6 +163,8 @@ class CharacterDetail(BaseModel):
     is_template: bool = False
     pipeline_id: str  # What to send to pipeline: bare slug for templates, "custom:<uuid>" for DB
     reference_sheet_url: str | None = None
+    has_photo: bool = False
+    photo_url: str | None = None
 
 
 class CharacterCreateRequest(BaseModel):

@@ -157,6 +157,15 @@ class CharacterRepository:
                 row.has_reference_sheet = value
                 await session.commit()
 
+    async def async_set_photo_path(self, char_id: uuid.UUID, path: str | None) -> None:
+        """Set or clear the photo_path for a character."""
+        AsyncSession = get_async_session_factory()
+        async with AsyncSession() as session:
+            row = await session.get(CharacterRow, char_id)
+            if row:
+                row.photo_path = path
+                await session.commit()
+
     # -----------------------------------------------------------------------
     # Sync methods (for CLI)
     # -----------------------------------------------------------------------

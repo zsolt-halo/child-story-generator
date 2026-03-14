@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   listAllCharacters,
@@ -7,6 +7,7 @@ import {
   deleteCharacter,
   duplicateTemplate,
   generateCharacterRefSheet,
+  uploadCharacterPhoto,
 } from "../api/client";
 import type { CharacterDetail, SSEEvent } from "../api/types";
 import { CharacterEditor } from "../components/CharacterEditor";
@@ -22,6 +23,8 @@ export function Characters() {
   const queryClient = useQueryClient();
   const [panel, setPanel] = useState<PanelMode>({ kind: "empty" });
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [autoGenTaskId, setAutoGenTaskId] = useState<string | null>(null);
+  const [photoUploadError, setPhotoUploadError] = useState<string | null>(null);
 
   const { data: characters, isLoading } = useQuery({
     queryKey: ["all-characters"],
@@ -39,9 +42,30 @@ export function Characters() {
       ? characters?.find((c) => (c.id ?? c.slug) === panel.id)
       : null;
 
+  const pendingPhotoRef = useRef<File | null>(null);
+
   const createMutation = useMutation({
     mutationFn: createCharacter,
-    onSuccess: (newChar) => {
+    onSuccess: async (newChar) => {
+      let genTaskId: string | null = null;
+      setPhotoUploadError(null);
+      // If there's a pending photo from the "real" flow, upload it immediately
+      if (pendingPhotoRef.current && newChar.id) {
+        try {
+          await uploadCharacterPhoto(newChar.id, pendingPhotoRef.current);
+          // Photo uploaded — auto-trigger reference sheet generation
+          try {
+            const res = await generateCharacterRefSheet(newChar.id);
+            genTaskId = res.task_id;
+          } catch { /* generation failed to start, user can retry manually */ }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Photo upload failed";
+          setPhotoUploadError(`Photo upload failed: ${msg}. You can upload it from the edit view.`);
+          console.error("Photo upload failed for character", newChar.id, err);
+        }
+        pendingPhotoRef.current = null;
+      }
+      setAutoGenTaskId(genTaskId);
       invalidate();
       setPanel({ kind: "view", id: newChar.id ?? newChar.slug });
     },
@@ -75,6 +99,7 @@ export function Characters() {
 
   const selectChar = (char: CharacterDetail) => {
     setConfirmDelete(false);
+    setAutoGenTaskId(null);
     setPanel({ kind: "view", id: char.id ?? char.slug });
   };
 
@@ -197,11 +222,15 @@ export function Characters() {
         {panel.kind === "create" && (
           <div className="max-w-2xl mx-auto px-6 py-8">
             <h2 className="text-xl font-extrabold text-bark-800 mb-1">New Character</h2>
-            <p className="text-sm text-bark-400 mb-6">Define a new character for your stories</p>
+            <p className="text-sm text-bark-400 mb-6">Choose how you'd like to create your character</p>
             <CharacterEditor
               mode="create"
-              onSave={(data) => createMutation.mutate(data)}
+              onSave={(data, photo) => {
+                if (photo) pendingPhotoRef.current = photo;
+                createMutation.mutate(data);
+              }}
               onCancel={() => setPanel({ kind: "empty" })}
+              onPhotoChanged={invalidate}
             />
             {createMutation.isError && (
               <p className="text-xs text-red-600 mt-3">
@@ -211,10 +240,24 @@ export function Characters() {
           </div>
         )}
 
+        {panel.kind === "view" && photoUploadError && (
+          <div className="mx-6 mt-4 px-4 py-3 bg-red-50 border border-red-200 rounded-[var(--radius-card)] text-sm text-red-700 flex items-start gap-2">
+            <svg className="w-4 h-4 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+            </svg>
+            <span>{photoUploadError}</span>
+            <button type="button" onClick={() => setPhotoUploadError(null)} className="ml-auto text-red-400 hover:text-red-600">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        )}
         {panel.kind === "view" && selectedChar && (
           <DetailPanel
             key={selectedChar.id ?? selectedChar.slug}
             character={selectedChar}
+            initialGenTaskId={autoGenTaskId}
             onEdit={() => {
               if (selectedChar.id) setPanel({ kind: "edit", id: selectedChar.id });
             }}
@@ -253,6 +296,7 @@ export function Characters() {
                 })
               }
               onCancel={() => setPanel({ kind: "view", id: selectedChar.id! })}
+              onPhotoChanged={invalidate}
             />
           </div>
         )}
@@ -358,6 +402,7 @@ function SidebarItem({
 
 function DetailPanel({
   character,
+  initialGenTaskId,
   onEdit,
   onCustomize,
   isCustomizing,
@@ -369,6 +414,7 @@ function DetailPanel({
   onRefSheetGenerated,
 }: {
   character: CharacterDetail;
+  initialGenTaskId?: string | null;
   onEdit: () => void;
   onCustomize: () => void;
   isCustomizing: boolean;
@@ -380,9 +426,11 @@ function DetailPanel({
   onRefSheetGenerated: () => void;
 }) {
   const palette = character.visual.color_palette;
-  const [generating, setGenerating] = useState(false);
-  const [genTaskId, setGenTaskId] = useState<string | null>(null);
-  const [genMessage, setGenMessage] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(!!initialGenTaskId);
+  const [genTaskId, setGenTaskId] = useState<string | null>(initialGenTaskId ?? null);
+  const [genMessage, setGenMessage] = useState<string | null>(
+    initialGenTaskId ? "Generating reference sheet..." : null
+  );
   const [localRefUrl, setLocalRefUrl] = useState<string | null>(null);
 
   const identifier = character.is_template ? character.slug : character.id!;
@@ -391,6 +439,9 @@ function DetailPanel({
   const handleSSEEvent = useCallback((event: SSEEvent) => {
     if (event.type === "phase_start" && event.message) {
       setGenMessage(event.message);
+    }
+    if (event.type === "queue_position") {
+      setGenMessage(`Waiting in queue (position ${event.position})...`);
     }
     if (event.type === "reference_sheet_complete") {
       setGenerating(false);
@@ -428,6 +479,25 @@ function DetailPanel({
 
   return (
     <div className="max-w-2xl mx-auto px-6 py-8">
+      {/* Uploaded reference photo */}
+      {character.photo_url && (
+        <div className="mb-4 rounded-[var(--radius-card)] border border-amber-200 overflow-hidden bg-amber-50/30">
+          <div className="flex items-center gap-4 p-4">
+            <img
+              src={`${character.photo_url}?w=200`}
+              alt="Reference photo"
+              className="w-20 h-20 rounded-lg object-cover border border-bark-200 shadow-sm"
+            />
+            <div>
+              <span className="text-[10px] font-semibold text-amber-700 uppercase tracking-wider">Reference Photo</span>
+              <p className="text-xs text-bark-400 mt-0.5">
+                Reference sheet will be generated to resemble this photo
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Reference sheet hero */}
       {refSheetUrl ? (
         <div className="mb-6 rounded-[var(--radius-card)] border border-bark-100 overflow-hidden bg-white shadow-sm">
@@ -492,6 +562,11 @@ function DetailPanel({
             {character.is_template && (
               <span className="shrink-0 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-sage-100 text-sage-700 rounded-full">
                 Template
+              </span>
+            )}
+            {character.has_photo && (
+              <span className="shrink-0 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 rounded-full">
+                Photo-based
               </span>
             )}
           </div>

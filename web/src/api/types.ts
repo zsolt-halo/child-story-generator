@@ -11,6 +11,7 @@ export interface StoryListItem {
   pipeline_status: "story_review" | "cast_review" | "complete" | "draft";
   is_auto?: boolean;
   has_video?: boolean;
+  animated_count?: number;
 }
 
 export interface Keyframe {
@@ -230,6 +231,8 @@ export interface CharacterDetail {
   is_template: boolean;
   pipeline_id: string;
   reference_sheet_url: string | null;
+  has_photo: boolean;
+  photo_url: string | null;
 }
 
 export interface CharacterCreateRequest {
