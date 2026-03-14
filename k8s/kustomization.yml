@@ -13,6 +13,7 @@ resources:
   - postgres-pvc.yml
   - postgres-statefulset.yml
   - postgres-service.yml
+  - postgres-nodeport.yml
   - deployment.yml
   - service.yml
   - frontend-deployment.yml

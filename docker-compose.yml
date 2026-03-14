@@ -15,6 +15,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    profiles: [offline]
 
   backend:
     build: .
@@ -23,7 +24,7 @@ services:
       - "9464:9464"
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://starlight:starlight@postgres:5432/starlight
+      DATABASE_URL: "${DATABASE_URL}"
       CORS_ORIGINS: "http://localhost:5173,http://localhost:3000"
       LOG_LEVEL: DEBUG
       OTEL_EXPORTER: "${OTEL_EXPORTER:-none}"
@@ -33,9 +34,6 @@ services:
       WORKER_AUTH_TOKEN: "${WORKER_AUTH_TOKEN:-dev-token}"
     volumes:
       - stories-data:/app/stories
-    depends_on:
-      postgres:
-        condition: service_healthy
 
   frontend:
     build: ./web
