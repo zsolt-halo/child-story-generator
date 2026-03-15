@@ -43,7 +43,6 @@ ENV PYTHONPATH=/app/deps
 # Application source
 COPY src/ ./src/
 COPY server/ ./server/
-COPY main.py ./
 COPY configs/ ./configs/
 COPY static/ ./static/
 COPY alembic.ini ./

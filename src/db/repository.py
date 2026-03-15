@@ -4,9 +4,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy import delete, select
-from sqlalchemy.exc import NoResultFound
 
-from src.db.engine import get_async_session_factory, get_sync_session_factory
+from src.db.engine import get_async_session_factory
 from src.db.models import CastMemberRow, KeyframeRow, StoryRow
 from src.models import CastMember, Keyframe, Story
 
@@ -174,84 +173,7 @@ def _cover_url_from_row(row: StoryRow) -> str | None:
 
 
 class StoryRepository:
-    """Provides both sync (CLI) and async (server) data access for stories."""
-
-    # -----------------------------------------------------------------------
-    # Sync methods (for CLI)
-    # -----------------------------------------------------------------------
-
-    def save(
-        self,
-        slug: str,
-        story: Story,
-        image_paths: list[str | Path] | None = None,
-        metadata: dict | None = None,
-    ) -> None:
-        """Upsert a story: insert or update by slug."""
-        Session = get_sync_session_factory()
-        with Session() as session:
-            existing = session.execute(
-                select(StoryRow).where(StoryRow.slug == slug)
-            ).scalar_one_or_none()
-
-            if existing is not None:
-                self._update_row_from_story(
-                    existing, story, metadata, image_paths, session
-                )
-            else:
-                row = _story_to_row(slug, story, metadata, image_paths)
-                session.add(row)
-
-            session.commit()
-
-    def get(self, slug: str) -> tuple[Story, list[Path]]:
-        """Load a story by slug. Returns (Story, image_paths)."""
-        Session = get_sync_session_factory()
-        with Session() as session:
-            row = session.execute(
-                select(StoryRow).where(StoryRow.slug == slug)
-            ).scalar_one_or_none()
-            if row is None:
-                raise FileNotFoundError(f"Story not found: {slug}")
-            story = _row_to_story(row)
-            paths = _image_paths_from_row(row)
-            return story, paths
-
-    def list_all(self) -> list[dict]:
-        """Return summary dicts for all stories, newest first."""
-        Session = get_sync_session_factory()
-        with Session() as session:
-            rows = session.execute(
-                select(StoryRow).order_by(StoryRow.created_at.desc())
-            ).scalars().all()
-            return [self._row_to_list_item(r) for r in rows]
-
-    def delete(self, slug: str) -> None:
-        """Delete a story by slug."""
-        Session = get_sync_session_factory()
-        with Session() as session:
-            row = session.execute(
-                select(StoryRow).where(StoryRow.slug == slug)
-            ).scalar_one_or_none()
-            if row is None:
-                raise FileNotFoundError(f"Story not found: {slug}")
-            session.delete(row)
-            session.commit()
-
-    def get_metadata(self, slug: str) -> dict | None:
-        """Load just metadata for a story."""
-        Session = get_sync_session_factory()
-        with Session() as session:
-            row = session.execute(
-                select(StoryRow).where(StoryRow.slug == slug)
-            ).scalar_one_or_none()
-            if row is None:
-                return None
-            return _row_to_metadata(row)
-
-    # -----------------------------------------------------------------------
-    # Async methods (for server)
-    # -----------------------------------------------------------------------
+    """Async data access for stories."""
 
     async def async_save(
         self,
@@ -401,73 +323,6 @@ class StoryRepository:
     # -----------------------------------------------------------------------
     # Internal helpers
     # -----------------------------------------------------------------------
-
-    def _update_row_from_story(
-        self,
-        row: StoryRow,
-        story: Story,
-        metadata: dict | None,
-        image_paths: list[str | Path] | None,
-        session,
-    ) -> None:
-        """Update an existing StoryRow in-place (sync)."""
-        config = (metadata or {}).get("config", {})
-
-        row.title = story.title
-        row.dedication = story.dedication
-        row.title_translated = story.title_translated
-        row.dedication_translated = story.dedication_translated
-
-        if metadata is not None:
-            row.notes = metadata.get("notes", row.notes)
-            row.parent_slug = metadata.get("parent_slug", row.parent_slug)
-            if config:
-                row.character = config.get("character", row.character)
-                row.narrator = config.get("narrator", row.narrator)
-                row.style = config.get("style", row.style)
-                row.pages = config.get("pages", row.pages)
-                row.language = config.get("language", row.language)
-
-        # Determine which pages have images
-        image_page_set: set[str] = set()
-        for p in image_paths or []:
-            image_page_set.add(Path(p).stem)
-
-        row.has_images = len(image_page_set) > 0
-        row.has_pdf = (STORIES_DIR / row.slug / "book.pdf").exists()
-        row.updated_at = datetime.now(timezone.utc)
-
-        # Replace keyframes
-        row.keyframes.clear()
-        for kf in story.keyframes:
-            row.keyframes.append(
-                KeyframeRow(
-                    story_id=row.id,
-                    page_number=kf.page_number,
-                    page_text=kf.page_text,
-                    visual_description=kf.visual_description,
-                    mood=kf.mood,
-                    beat_summary=kf.beat_summary,
-                    is_cover=kf.is_cover,
-                    page_text_translated=kf.page_text_translated,
-                    has_image=kf.image_prefix in image_page_set,
-                )
-            )
-
-        # Replace cast members
-        row.cast_members.clear()
-        for cm in story.cast:
-            row.cast_members.append(
-                CastMemberRow(
-                    story_id=row.id,
-                    name=cm.name,
-                    role=cm.role,
-                    species=cm.species,
-                    visual_description=cm.visual_description,
-                    visual_constants=cm.visual_constants,
-                    appears_on_pages=cm.appears_on_pages,
-                )
-            )
 
     async def _async_update_row_from_story(
         self,

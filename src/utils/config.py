@@ -54,27 +54,8 @@ def build_config(**overrides) -> BookConfig:
     return BookConfig(**merged)
 
 
-def resolve_character(identifier: str) -> Character:
-    """Resolve a character from either DB (custom:<uuid>) or TOML config.
-
-    If *identifier* starts with ``custom:``, the trailing UUID is used to look
-    up the character from the database via ``CharacterRepository`` (sync).
-    Otherwise the identifier is treated as a TOML config name and passed to
-    ``load_character``.
-    """
-    if identifier.startswith("custom:"):
-        char_id = uuid.UUID(identifier.removeprefix("custom:"))
-        from src.db.character_repository import CharacterRepository
-        char = CharacterRepository().get_by_id(char_id)
-        logger.debug("Resolved character %s → %s (DB)", identifier, char.name)
-        return char
-    char = load_character(identifier)
-    logger.debug("Resolved character %s → %s (TOML)", identifier, char.name)
-    return char
-
-
 async def async_resolve_character(identifier: str) -> Character:
-    """Async version of :func:`resolve_character` for server use.
+    """Resolve a character from either DB (custom:<uuid>) or TOML config.
 
     If *identifier* starts with ``custom:``, the trailing UUID is used to look
     up the character from the database via ``CharacterRepository`` (async).

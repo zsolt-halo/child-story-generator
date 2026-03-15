@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import select
 
-from src.db.engine import get_async_session_factory, get_sync_session_factory
+from src.db.engine import get_async_session_factory
 from src.db.models import CharacterRow
 from src.models import Character, CharacterPersonality, CharacterVisual, CharacterStoryRules
 
@@ -59,11 +59,7 @@ def _character_to_row(char: Character, slug: str, is_template: bool = False) -> 
 
 
 class CharacterRepository:
-    """Provides both sync (CLI) and async (server) data access for characters."""
-
-    # -----------------------------------------------------------------------
-    # Async methods (for server)
-    # -----------------------------------------------------------------------
+    """Async data access for characters."""
 
     async def async_list_all(self) -> list[CharacterRow]:
         """Return all character rows, newest first."""
@@ -166,17 +162,3 @@ class CharacterRepository:
                 row.photo_path = path
                 await session.commit()
 
-    # -----------------------------------------------------------------------
-    # Sync methods (for CLI)
-    # -----------------------------------------------------------------------
-
-    def get_by_id(self, id: uuid.UUID) -> Character:
-        """Load a character by UUID (sync, for CLI use). Returns Pydantic model."""
-        Session = get_sync_session_factory()
-        with Session() as session:
-            row = session.execute(
-                select(CharacterRow).where(CharacterRow.id == id)
-            ).scalar_one_or_none()
-            if row is None:
-                raise FileNotFoundError(f"Character not found: {id}")
-            return _row_to_character(row)
