@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="cover" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#8b5cf6"/>
+    </linearGradient>
+    <linearGradient id="pages" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fef9c3"/>
+      <stop offset="100%" stop-color="#fde68a"/>
+    </linearGradient>
+    <linearGradient id="star" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fbbf24"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+  </defs>
+  <!-- open book - left cover -->
+  <path d="M16 32 Q16 28 20 26 L58 18 Q62 17 64 20 L64 100 Q62 97 58 98 L20 106 Q16 107 16 103Z" fill="url(#cover)"/>
+  <!-- open book - right cover -->
+  <path d="M112 32 Q112 28 108 26 L70 18 Q66 17 64 20 L64 100 Q66 97 70 98 L108 106 Q112 107 112 103Z" fill="url(#cover)"/>
+  <!-- left pages -->
+  <path d="M22 34 Q22 31 25 30 L58 22 Q62 21 64 24 L64 96 Q62 93 58 94 L25 102 Q22 103 22 100Z" fill="url(#pages)"/>
+  <!-- right pages -->
+  <path d="M106 34 Q106 31 103 30 L70 22 Q66 21 64 24 L64 96 Q66 93 70 94 L103 102 Q106 103 106 100Z" fill="url(#pages)"/>
+  <!-- spine -->
+  <rect x="62" y="18" width="4" height="84" rx="2" fill="#4f46e5" opacity="0.3"/>
+  <!-- page lines left -->
+  <line x1="30" y1="44" x2="56" y2="38" stroke="#d4a574" stroke-width="1.5" stroke-linecap="round" opacity="0.4"/>
+  <line x1="30" y1="54" x2="56" y2="48" stroke="#d4a574" stroke-width="1.5" stroke-linecap="round" opacity="0.4"/>
+  <line x1="30" y1="64" x2="56" y2="58" stroke="#d4a574" stroke-width="1.5" stroke-linecap="round" opacity="0.4"/>
+  <!-- star rising from book -->
+  <path d="M64 6 L68.5 18 L81 18 L71 26 L74.5 38 L64 30 L53.5 38 L57 26 L47 18 L59.5 18Z" fill="url(#star)"/>
+  <!-- sparkles -->
+  <circle cx="40" cy="14" r="2" fill="#fbbf24" opacity="0.7"/>
+  <circle cx="88" cy="10" r="1.5" fill="#fbbf24" opacity="0.5"/>
+  <circle cx="94" cy="22" r="1.8" fill="#fbbf24" opacity="0.6"/>
+  <circle cx="34" cy="22" r="1.2" fill="#fbbf24" opacity="0.5"/>
+</svg>
