@@ -44,7 +44,18 @@ async def lifespan(app: FastAPI):
         logger.info("Database migrations applied")
     except Exception:
         logger.warning("Auto-migration failed — DB may not be configured", exc_info=True)
+
+    # Start background cache GC worker
+    gc_task = None
+    from src import storage
+    if storage.is_enabled():
+        from server.services.cache_gc import start_gc_worker
+        gc_task = asyncio.create_task(start_gc_worker())
+
     yield
+
+    if gc_task:
+        gc_task.cancel()
     shutdown_telemetry()
 
 

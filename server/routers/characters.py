@@ -20,6 +20,7 @@ from server.schemas import (
 )
 from server.services import character_service
 from server.services.task_manager import task_manager
+from src import storage
 
 router = APIRouter(prefix="/api/characters", tags=["characters"])
 
@@ -113,7 +114,10 @@ async def serve_template_reference_sheet(slug: str, w: int | None = Query(None))
     """Serve the reference sheet image for a TOML template character."""
     file_path = character_service._template_char_dir(slug) / "reference_sheet.png"
     if not file_path.exists():
-        raise HTTPException(404, "Reference sheet not found")
+        key = f".characters/{slug}/reference_sheet.png"
+        found = await storage.ensure_local(key, file_path)
+        if not found:
+            raise HTTPException(404, "Reference sheet not found")
 
     if w is None:
         return FileResponse(file_path, media_type="image/png")
@@ -141,7 +145,10 @@ async def serve_reference_sheet(id: str, w: int | None = Query(None)):
 
     file_path = character_service._custom_char_dir(row.id) / "reference_sheet.png"
     if not file_path.exists():
-        raise HTTPException(404, "Reference sheet not found")
+        key = f".characters/{row.id}/reference_sheet.png"
+        found = await storage.ensure_local(key, file_path)
+        if not found:
+            raise HTTPException(404, "Reference sheet not found")
 
     if w is None:
         return FileResponse(file_path, media_type="image/png")
@@ -185,6 +192,9 @@ async def upload_photo(id: str, file: UploadFile = File(...)):
         img = img.convert("RGB")
     img.save(photo_path, format="PNG")
 
+    # Upload to object storage
+    await storage.upload_file(f".characters/{row.id}/photo.png", photo_path)
+
     # Update DB
     await CharacterRepository().async_set_photo_path(uuid.UUID(id), str(photo_path))
 
@@ -206,7 +216,10 @@ async def serve_photo(id: str, w: int | None = Query(None)):
 
     file_path = Path(row.photo_path)
     if not file_path.exists():
-        raise HTTPException(404, "Photo file not found")
+        key = f".characters/{row.id}/photo.png"
+        found = await storage.ensure_local(key, file_path)
+        if not found:
+            raise HTTPException(404, "Photo file not found")
 
     if w is None:
         return FileResponse(file_path, media_type="image/png")
@@ -241,6 +254,8 @@ async def delete_photo(id: str):
         if thumbs_dir.exists():
             for f in thumbs_dir.glob("photo_w*"):
                 f.unlink()
+        # Remove from object storage
+        await storage.delete_object(f".characters/{row.id}/photo.png")
 
     await CharacterRepository().async_set_photo_path(uuid.UUID(id), None)
 

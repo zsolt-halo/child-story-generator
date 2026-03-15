@@ -17,6 +17,7 @@ from src.utils.config import build_config, load_style, async_resolve_character
 from src.utils.io import slugify
 
 from server.services.task_manager import task_manager
+from src import storage
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("starlight.pipeline")
@@ -35,8 +36,12 @@ async def _load_character_photo(character_id: str) -> bytes | None:
         return None
     photo_file = Path(row.photo_path)
     if not photo_file.exists():
-        logger.warning("Character %s photo_path=%s but file does not exist!", character_id, row.photo_path)
-        return None
+        # Try to fetch from object storage
+        char_uuid = character_id.removeprefix("custom:")
+        found = await storage.ensure_local(f".characters/{char_uuid}/photo.png", photo_file)
+        if not found:
+            logger.warning("Character %s photo_path=%s but file does not exist!", character_id, row.photo_path)
+            return None
     data = await asyncio.to_thread(photo_file.read_bytes)
     logger.info("Loaded photo for %s: %d bytes from %s", character_id, len(data), row.photo_path)
     return data
@@ -439,6 +444,9 @@ async def run_full_pipeline(
         pdf_path = output_dir / "book.pdf"
         await asyncio.to_thread(render_book_pdf, story, image_paths, pdf_path, backdrop_paths or None)
 
+    # Sync all assets to object storage
+    await storage.sync_directory(output_dir, slug)
+
     logger.info("Full pipeline completed in %.1fs: slug=%s", _time.monotonic() - t0, slug)
     return {"slug": slug, "title": story.title}
 
@@ -574,6 +582,9 @@ async def run_auto_pipeline(
     async with _phase(task_id, "pdf", "Rendering PDF..."):
         pdf_path = output_dir / "book.pdf"
         await asyncio.to_thread(render_book_pdf, story, image_paths, pdf_path, backdrop_paths or None)
+
+    # Sync all assets to object storage
+    await storage.sync_directory(output_dir, slug)
 
     logger.info("Auto pipeline completed in %.1fs: slug=%s", _time.monotonic() - t0, slug)
     return {"slug": slug, "title": story.title}
@@ -723,6 +734,9 @@ async def run_story_only(
                 })
             r.update(count=len(variation_paths))
 
+    # Sync ref sheets + cover variations to object storage
+    await storage.sync_directory(output_dir, slug)
+
     return {
         "slug": slug,
         "title": story.title,
@@ -787,6 +801,9 @@ async def run_cast_extraction(task_id: str, slug: str) -> dict:
                 if i < cast_count - 1:
                     await asyncio.sleep(5.0)
             r.update(count=len(cast_ref_urls))
+
+    # Sync ref sheets to object storage
+    await storage.sync_directory(images_dir, f"{slug}/images")
 
     return {
         "slug": slug,
@@ -874,6 +891,9 @@ async def run_illustrate(task_id: str, slug: str, page_number: int | None = None
     if page_number is None:
         await _save(slug, ctx.story, [str(p) for p in new_paths])
 
+    # Sync illustrations to object storage
+    await storage.sync_directory(images_dir, f"{slug}/images")
+
     return {"slug": slug, "images_generated": len(new_paths)}
 
 
@@ -905,6 +925,12 @@ async def run_regenerate_cast_ref_sheet(task_id: str, slug: str, member_name: st
             "url": url,
         })
         r.update(name=member_name, url=url, generated=ref_path is not None)
+
+    # Sync updated ref sheet to object storage
+    for suffix in [f"ref_{name_slug}.png", f"ref_{name_slug}_raw.png"]:
+        p = images_dir / suffix
+        if p.exists():
+            await storage.upload_file(f"{slug}/images/{suffix}", p)
 
     return {"slug": slug, "name": member_name, "url": url}
 
@@ -1000,6 +1026,9 @@ async def run_continue_pipeline(task_id: str, slug: str, cast_edited: bool = Fal
                     "url": url,
                 })
             r.update(count=len(variation_paths))
+
+        # Sync cover variations to object storage
+        await storage.sync_directory(images_dir, f"{slug}/images")
 
         return {
             "slug": slug,
@@ -1107,6 +1136,9 @@ async def run_after_cover_selection(task_id: str, slug: str, choice: int) -> dic
         pdf_path = ctx.story_dir / "book.pdf"
         await asyncio.to_thread(render_book_pdf, ctx.story, new_image_paths, pdf_path, backdrop_paths or None)
 
+    # Sync all assets to object storage
+    await storage.sync_directory(ctx.story_dir, slug)
+
     return {"slug": slug, "title": ctx.story.title}
 
 
@@ -1169,6 +1201,9 @@ async def _run_animate_local(task_id: str, slug: str) -> dict:
             ctx.story.keyframes,
             on_progress=sync_on_progress,
         )
+
+    # Sync videos to object storage
+    await storage.sync_directory(ctx.story_dir / "videos", f"{slug}/videos")
 
     await _update_video_db(slug, clip_paths)
     return {"slug": slug, "clips_generated": len(clip_paths)}
@@ -1277,6 +1312,10 @@ async def _run_animate_remote(task_id: str, slug: str) -> dict:
         for kf in ctx.story.keyframes
         if (videos_dir / f"{kf.image_prefix}.mp4").exists()
     ]
+
+    # Sync videos to object storage
+    videos_dir = ctx.story_dir / "videos"
+    await storage.sync_directory(videos_dir, f"{slug}/videos")
 
     await _update_video_db(slug, clip_paths)
     return {"slug": slug, "clips_generated": len(clip_paths)}

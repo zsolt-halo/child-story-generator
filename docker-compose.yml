@@ -32,6 +32,9 @@ services:
       OTEL_SERVICE_NAME: "starlight-backend"
       ANIMATION_MODE: "${ANIMATION_MODE:-remote}"
       WORKER_AUTH_TOKEN: "${WORKER_AUTH_TOKEN:-dev-token}"
+      MINIO_ENDPOINT: "${MINIO_ENDPOINT:-192.168.86.45:30900}"
+      MINIO_ACCESS_KEY: "${MINIO_ACCESS_KEY:-minioadmin}"
+      MINIO_SECRET_KEY: "${MINIO_SECRET_KEY:-minioadmin}"
     volumes:
       - stories-data:/app/stories
 

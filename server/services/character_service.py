@@ -6,6 +6,7 @@ import uuid
 from src.models import Character, CharacterPersonality, CharacterVisual, CharacterStoryRules
 from src.utils.config import CHARACTERS_DIR, load_character
 from src.db.character_repository import CharacterRepository
+from src import storage
 
 logger = logging.getLogger(__name__)
 _repo = CharacterRepository()
@@ -162,12 +163,13 @@ async def delete_character(id: str) -> None:
                 f"Cannot delete: character is used by story '{referencing}'"
             )
 
-    # Clean up files on disk before deleting the DB row
+    # Clean up files on disk and object storage before deleting the DB row
     try:
         import shutil
         char_dir = _custom_char_dir(id)
         if char_dir.exists():
             shutil.rmtree(char_dir)
+        await storage.delete_prefix(f".characters/{id}/")
     except Exception:
         logger.warning("Failed to clean up character files for %s", id, exc_info=True)
 
@@ -287,6 +289,9 @@ async def generate_character_reference_sheet(task_id: str, identifier: str, slug
     if identifier.startswith("custom:"):
         char_id = identifier.removeprefix("custom:")
         await _repo.async_set_has_reference_sheet(uuid.UUID(char_id), True)
+
+    # Sync ref sheet to object storage
+    await storage.sync_directory(output_dir, f".characters/{output_dir.name}")
 
     # Determine the URL based on character type
     if identifier.startswith("custom:"):

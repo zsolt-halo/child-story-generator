@@ -19,6 +19,9 @@ resources:
   - frontend-deployment.yml
   - frontend-service.yml
   - nodeport.yml
+  - minio-pvc.yml
+  - minio-deployment.yml
+  - minio-service.yml
 
 commonLabels:
   project: starlight

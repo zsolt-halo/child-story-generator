@@ -8,6 +8,7 @@ from pathlib import Path
 from src.models import Story, CastMember
 from src.db.repository import StoryRepository
 from server.schemas import StoryListItem
+from src import storage
 
 logger = logging.getLogger(__name__)
 
@@ -46,19 +47,25 @@ async def update_story(
 
 
 async def delete_story(slug: str):
-    """Delete a story from DB and disk."""
+    """Delete a story from DB, disk, and object storage."""
     logger.info("Deleting story: %s", slug)
     await _repo.async_delete(slug)
     story_dir = STORIES_DIR / slug
     if story_dir.exists():
         shutil.rmtree(story_dir)
+    await storage.delete_prefix(f"{slug}/")
 
 
 def get_story_dir(slug: str) -> Path:
-    """Get path to a story directory."""
+    """Get path to a story directory. Creates it if needed (MinIO will populate on demand)."""
     story_dir = STORIES_DIR / slug
     if not story_dir.exists():
-        raise FileNotFoundError(f"Story not found: {slug}")
+        # With object storage, the directory may not exist locally yet.
+        # Create it so file-serving endpoints can cache downloaded files.
+        if storage.is_enabled():
+            story_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            raise FileNotFoundError(f"Story not found: {slug}")
     return story_dir
 
 
@@ -75,6 +82,22 @@ async def save_to_db(
 async def get_metadata(slug: str) -> dict | None:
     """Load metadata for a story from the database."""
     return await _repo.async_get_metadata(slug)
+
+
+async def get_db_flags(slug: str) -> dict:
+    """Get has_pdf / has_video / has_images flags from DB."""
+    from src.db.engine import get_async_session_factory
+    from src.db.models import StoryRow
+    from sqlalchemy import select
+    async with get_async_session_factory()() as session:
+        result = await session.execute(
+            select(StoryRow.has_images, StoryRow.has_pdf, StoryRow.has_video)
+            .where(StoryRow.slug == slug)
+        )
+        row = result.one_or_none()
+        if row:
+            return {"has_images": row.has_images, "has_pdf": row.has_pdf, "has_video": row.has_video}
+        return {"has_images": False, "has_pdf": False, "has_video": False}
 
 
 async def branch_story(source_slug: str, new_config: dict, start_from: str) -> tuple[str, Path, str]:

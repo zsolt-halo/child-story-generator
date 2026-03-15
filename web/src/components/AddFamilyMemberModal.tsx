@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { listAllCharacters, addFamilyMember, createAndLinkFamilyMember } from "../api/client";
 import type { CharacterDetail, CharacterCreateRequest } from "../api/types";
 import { CharacterEditor } from "./CharacterEditor";
 
-const RELATIONSHIP_SUGGESTIONS = ["Mom", "Dad", "Sister", "Brother", "Grandma", "Grandpa", "Pet", "Best Friend"];
+const RELATIONSHIP_SUGGESTIONS = ["Mom", "Dad", "Sister", "Brother", "Grandma", "Grandpa", "Pet", "Best Friend", "Other"];
 
 export function AddFamilyMemberModal({
   characterId,
@@ -21,11 +21,24 @@ export function AddFamilyMemberModal({
   const [search, setSearch] = useState("");
   const [relationship, setRelationship] = useState("");
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
+  const relationshipInputRef = useRef<HTMLInputElement>(null);
 
-  const { data: characters } = useQuery({
+  const { data: characters, isSuccess } = useQuery({
     queryKey: ["all-characters"],
     queryFn: listAllCharacters,
   });
+
+  // Auto-switch to "Create New" when no linkable characters exist
+  const excludeIds = new Set([...existingMemberIds, characterId]);
+  const available = (characters ?? []).filter(
+    (c) => !c.is_template && c.id && !excludeIds.has(c.id),
+  );
+
+  useEffect(() => {
+    if (isSuccess && available.length === 0) {
+      setTab("create");
+    }
+  }, [isSuccess, available.length]);
 
   const addMutation = useMutation({
     mutationFn: ({ memberId, label }: { memberId: string; label: string }) =>
@@ -39,11 +52,6 @@ export function AddFamilyMemberModal({
     onSuccess: onAdded,
   });
 
-  // Filter: custom characters only, exclude self and already-linked
-  const excludeIds = new Set([...existingMemberIds, characterId]);
-  const available = (characters ?? []).filter(
-    (c) => !c.is_template && c.id && !excludeIds.has(c.id),
-  );
   const filtered = search
     ? available.filter((c) => c.name.toLowerCase().includes(search.toLowerCase()))
     : available;
@@ -80,7 +88,7 @@ export function AddFamilyMemberModal({
                 : "text-bark-400 hover:text-bark-600"
             }`}
           >
-            Pick Existing
+            Existing Character
           </button>
           <button
             onClick={() => setTab("create")}
@@ -102,10 +110,11 @@ export function AddFamilyMemberModal({
               Relationship
             </label>
             <input
+              ref={relationshipInputRef}
               type="text"
               value={relationship}
               onChange={(e) => setRelationship(e.target.value)}
-              placeholder="e.g. Mom, Best Friend, Pet Cat"
+              placeholder="e.g. Mom, Best Friend, Pet Cat, Uncle"
               className="w-full px-3 py-2 bg-cream border border-bark-200 rounded-[var(--radius-btn)] text-sm text-bark-800 placeholder:text-bark-300 focus:outline-none focus:border-sage-400 focus:ring-1 focus:ring-sage-400"
             />
             <div className="flex flex-wrap gap-1.5 mt-2">
@@ -113,9 +122,16 @@ export function AddFamilyMemberModal({
                 <button
                   key={s}
                   type="button"
-                  onClick={() => setRelationship(s)}
+                  onClick={() => {
+                    if (s === "Other") {
+                      setRelationship("");
+                      relationshipInputRef.current?.focus();
+                    } else {
+                      setRelationship(s);
+                    }
+                  }}
                   className={`px-2.5 py-1 text-[11px] font-medium rounded-full transition-colors ${
-                    relationship === s
+                    s !== "Other" && relationship === s
                       ? "bg-sage-500 text-white"
                       : "bg-bark-50 text-bark-500 hover:bg-bark-100"
                   }`}
@@ -136,11 +152,22 @@ export function AddFamilyMemberModal({
                 className="w-full px-3 py-2 mb-3 bg-cream border border-bark-200 rounded-[var(--radius-btn)] text-sm text-bark-800 placeholder:text-bark-300 focus:outline-none focus:border-sage-400 focus:ring-1 focus:ring-sage-400"
               />
               {filtered.length === 0 ? (
-                <p className="text-sm text-bark-400 text-center py-6">
-                  {available.length === 0
-                    ? "No custom characters available. Create one first!"
-                    : "No matches found"}
-                </p>
+                <div className="text-center py-6">
+                  <p className="text-sm text-bark-400">
+                    {available.length === 0
+                      ? "No other characters to link."
+                      : "No matches found."}
+                  </p>
+                  {available.length === 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setTab("create")}
+                      className="mt-2 text-sm font-medium text-sage-600 hover:text-sage-700"
+                    >
+                      Create a new character &rarr;
+                    </button>
+                  )}
+                </div>
               ) : (
                 <div className="space-y-1">
                   {filtered.map((c) => (

@@ -40,6 +40,14 @@ async def fix_page(slug: str, page: int):
     return TaskResponse(task_id=task_id)
 
 
+@router.post("/gc")
+async def trigger_gc():
+    """Manually trigger a cache garbage collection cycle."""
+    from server.services.cache_gc import run_gc_cycle
+    stats = await run_gc_cycle()
+    return stats
+
+
 @router.get("/progress/{task_id}")
 async def stream_sanity_progress(task_id: str):
     queue = task_manager.subscribe(task_id)

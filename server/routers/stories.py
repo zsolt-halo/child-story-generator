@@ -9,7 +9,9 @@ from fastapi.responses import FileResponse
 from server.schemas import StoryListItem, StoryUpdate
 from server.services.story_service import (
     list_stories, get_story, update_story, delete_story, get_story_dir, get_metadata,
+    get_db_flags, STORIES_DIR,
 )
+from src import storage
 
 router = APIRouter(prefix="/api/stories", tags=["stories"])
 
@@ -41,7 +43,8 @@ async def get_story_detail(slug: str):
     image_urls = {}
     for kf in story.keyframes:
         img = images_dir / f"{kf.image_prefix}.png"
-        if img.exists():
+        # Check local first; if not found, check if we have image_paths from DB
+        if img.exists() or image_paths:
             image_urls[kf.page_number] = f"/api/stories/{slug}/images/{kf.image_prefix}.png"
 
     from src.utils.io import get_static_backdrops
@@ -70,16 +73,16 @@ async def get_story_detail(slug: str):
         if ref_path.exists():
             cast_ref_urls[member.name] = f"/api/stories/{slug}/images/ref_{name_slug}.png"
 
-    # Check for video files
+    # Video URLs — check local first, fall back to DB flag (serve endpoint handles MinIO)
     videos_dir = story_dir / "videos"
     video_urls: dict[int, str] = {}
-    if videos_dir.exists():
-        for kf in story.keyframes:
-            vid = videos_dir / f"{kf.image_prefix}.mp4"
-            if vid.exists():
-                video_urls[kf.page_number] = f"/api/stories/{slug}/videos/{kf.image_prefix}.mp4"
+    for kf in story.keyframes:
+        vid = videos_dir / f"{kf.image_prefix}.mp4"
+        if vid.exists():
+            video_urls[kf.page_number] = f"/api/stories/{slug}/videos/{kf.image_prefix}.mp4"
 
     metadata = await get_metadata(slug)
+    db_flags = await get_db_flags(slug)
 
     return {
         "slug": slug,
@@ -90,10 +93,10 @@ async def get_story_detail(slug: str):
         "cover_variation_urls": cover_variation_urls,
         "reference_sheet_url": reference_sheet_url,
         "cast_ref_urls": cast_ref_urls,
-        "has_pdf": (story_dir / "book.pdf").exists(),
-        "has_screen_pdf": (story_dir / "book-screen.pdf").exists(),
-        "has_spread_pdf": (story_dir / "book-spreads.pdf").exists(),
-        "has_video": len(video_urls) > 0,
+        "has_pdf": db_flags["has_pdf"] or (story_dir / "book.pdf").exists(),
+        "has_screen_pdf": db_flags["has_pdf"] or (story_dir / "book-screen.pdf").exists(),
+        "has_spread_pdf": db_flags["has_pdf"] or (story_dir / "book-spreads.pdf").exists(),
+        "has_video": db_flags["has_video"] or len(video_urls) > 0,
         "metadata": metadata,
     }
 
@@ -127,14 +130,15 @@ ALLOWED_WIDTHS = {200, 400, 600, 800}
 
 @router.get("/{slug}/images/{filename}")
 async def serve_image(slug: str, filename: str, w: int | None = Query(None)):
-    try:
-        story_dir = get_story_dir(slug)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Story not found")
-
+    story_dir = STORIES_DIR / slug
     file_path = story_dir / "images" / filename
+
+    # Try local first, fall back to MinIO download + cache
     if not file_path.exists():
-        raise HTTPException(status_code=404, detail="Image not found")
+        key = f"{slug}/images/{filename}"
+        found = await storage.ensure_local(key, file_path)
+        if not found:
+            raise HTTPException(status_code=404, detail="Image not found")
 
     # No resize requested — serve full image
     if w is None:
@@ -160,36 +164,33 @@ async def serve_image(slug: str, filename: str, w: int | None = Query(None)):
 
 @router.get("/{slug}/videos/{filename}")
 async def serve_video(slug: str, filename: str):
-    try:
-        story_dir = get_story_dir(slug)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Story not found")
-
+    story_dir = STORIES_DIR / slug
     file_path = story_dir / "videos" / filename
+
     if not file_path.exists():
-        raise HTTPException(status_code=404, detail="Video not found")
+        key = f"{slug}/videos/{filename}"
+        found = await storage.ensure_local(key, file_path)
+        if not found:
+            raise HTTPException(status_code=404, detail="Video not found")
     return FileResponse(file_path, media_type="video/mp4")
 
 
 @router.get("/{slug}/backdrops/{filename}")
 async def serve_backdrop(slug: str, filename: str):
-    try:
-        story_dir = get_story_dir(slug)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Story not found")
-
+    story_dir = STORIES_DIR / slug
     file_path = story_dir / "backdrops" / filename
+
     if not file_path.exists():
-        raise HTTPException(status_code=404, detail="Backdrop not found")
+        key = f"{slug}/backdrops/{filename}"
+        found = await storage.ensure_local(key, file_path)
+        if not found:
+            raise HTTPException(status_code=404, detail="Backdrop not found")
     return FileResponse(file_path, media_type="image/png")
 
 
 @router.get("/{slug}/pdf/{variant}")
 async def serve_pdf(slug: str, variant: str):
-    try:
-        story_dir = get_story_dir(slug)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Story not found")
+    story_dir = STORIES_DIR / slug
 
     filename_map = {
         "print": "book.pdf",
@@ -202,5 +203,8 @@ async def serve_pdf(slug: str, variant: str):
 
     file_path = story_dir / filename
     if not file_path.exists():
-        raise HTTPException(status_code=404, detail="PDF not found")
+        key = f"{slug}/{filename}"
+        found = await storage.ensure_local(key, file_path)
+        if not found:
+            raise HTTPException(status_code=404, detail="PDF not found")
     return FileResponse(file_path, media_type="application/pdf")
