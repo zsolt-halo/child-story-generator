@@ -28,18 +28,22 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize telemetry then run DB table creation as a dev safety net on startup."""
+    """Initialize telemetry and run DB migrations on startup."""
     from server.telemetry import setup_telemetry, shutdown_telemetry
     setup_telemetry(app)
     try:
-        from src.db.engine import get_async_engine
-        from src.db.models import Base
-        engine = get_async_engine()
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        logger.info("Database tables verified")
+        import asyncio
+        from alembic.config import Config
+        from alembic import command
+
+        def _run_migrations():
+            alembic_cfg = Config("alembic.ini")
+            command.upgrade(alembic_cfg, "head")
+
+        await asyncio.to_thread(_run_migrations)
+        logger.info("Database migrations applied")
     except Exception:
-        logger.debug("DB auto-create skipped (not configured)", exc_info=True)
+        logger.warning("Auto-migration failed — DB may not be configured", exc_info=True)
     yield
     shutdown_telemetry()
 
