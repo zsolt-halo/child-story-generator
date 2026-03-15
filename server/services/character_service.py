@@ -29,12 +29,20 @@ def _template_char_dir(slug: str) -> "Path":
 
 def _row_to_dict(row) -> dict:
     """Convert a CharacterRow to an API-friendly dict."""
-    family_count = len(row.family_links) if hasattr(row, "family_links") and row.family_links else 0
+    links = row.family_links if hasattr(row, "family_links") and row.family_links else []
+    family_members = []
+    for link in links:
+        family_members.append({
+            "member_id": str(link.member_id),
+            "name": link.member.name,
+            "relationship_label": link.relationship_label,
+        })
     return {
         "id": str(row.id),
         "slug": row.slug,
         "name": row.name,
         "child_name": row.child_name,
+        "age": row.age,
         "personality": {
             "traits": row.traits or [],
             "speech_style": row.speech_style or "",
@@ -53,7 +61,8 @@ def _row_to_dict(row) -> dict:
         "reference_sheet_url": f"/api/characters/{row.id}/reference-sheet" if row.has_reference_sheet else None,
         "has_photo": bool(row.photo_path),
         "photo_url": f"/api/characters/{row.id}/photo" if row.photo_path else None,
-        "family_member_count": family_count,
+        "family_member_count": len(family_members),
+        "family_members": family_members,
     }
 
 
@@ -103,6 +112,7 @@ async def create_character(data: dict) -> dict:
     char = Character(
         name=data["name"],
         child_name=data["child_name"],
+        age=data.get("age"),
         personality=CharacterPersonality(**data["personality"]),
         visual=CharacterVisual(**data["visual"]),
         story_rules=CharacterStoryRules(**data["story_rules"]),
@@ -119,6 +129,7 @@ async def update_character(id: str, data: dict) -> dict:
     char = Character(
         name=data.get("name", current.name),
         child_name=data.get("child_name", current.child_name),
+        age=data.get("age", current.age),
         personality=CharacterPersonality(
             **(data.get("personality") or {
                 "traits": current.traits or [],
@@ -239,8 +250,16 @@ async def polish_character(
     return {k: d[k] for k in ("personality", "visual", "story_rules")}
 
 
-async def generate_character_reference_sheet(task_id: str, identifier: str, slug: str) -> None:
-    """Generate a visual reference sheet for a character (runs as a task)."""
+async def generate_character_reference_sheet(
+    task_id: str, identifier: str, slug: str, overrides: dict | None = None,
+) -> None:
+    """Generate a visual reference sheet for a character (runs as a task).
+
+    When *overrides* is provided (from the refine endpoint), its keys can include:
+    - ``visual_constants``: replacement for character.visual.constants
+    - ``color_palette``: replacement for character.visual.color_palette
+    - ``temp_photo_path``: path to a temporary photo to use instead of the stored one
+    """
     import asyncio
     from pathlib import Path
 
@@ -257,9 +276,20 @@ async def generate_character_reference_sheet(task_id: str, identifier: str, slug
 
     character = await async_resolve_character(identifier)
 
-    # Load photo if available (for photo-based ref sheet generation)
+    # Apply visual overrides (refine flow — does not persist to DB)
+    if overrides:
+        if "visual_constants" in overrides:
+            character.visual.constants = overrides["visual_constants"]
+        if "color_palette" in overrides:
+            character.visual.color_palette = overrides["color_palette"]
+
+    # Load photo: prefer temp override, fall back to stored photo
     photo_bytes = None
-    if identifier.startswith("custom:"):
+    if overrides and overrides.get("temp_photo_path"):
+        temp_path = Path(overrides["temp_photo_path"])
+        if temp_path.exists():
+            photo_bytes = await asyncio.to_thread(temp_path.read_bytes)
+    elif identifier.startswith("custom:"):
         char_id = identifier.removeprefix("custom:")
         row = await _repo.async_get_by_id(uuid.UUID(char_id))
         if row.photo_path:
@@ -299,6 +329,12 @@ async def generate_character_reference_sheet(task_id: str, identifier: str, slug
         url = f"/api/characters/{char_id}/reference-sheet"
     else:
         url = f"/api/characters/template/{slug}/reference-sheet"
+
+    # Clean up temp photo from refine flow
+    if overrides and overrides.get("temp_photo_path"):
+        temp = Path(overrides["temp_photo_path"])
+        if temp.exists():
+            temp.unlink(missing_ok=True)
 
     await task_manager.broadcast(task_id, {
         "type": "reference_sheet_complete",
@@ -366,6 +402,11 @@ async def create_and_link_family_member(
     character_id: str, char_data: dict, relationship_label: str
 ) -> dict:
     """Create a new character and link it as a family member in one step."""
+    # Auto-inherit child_name from the parent character so the frontend
+    # doesn't need to ask for it (the family member belongs to the same child).
+    if not char_data.get("child_name"):
+        parent = await get_character(character_id)
+        char_data["child_name"] = parent["child_name"]
     new_char = await create_character(char_data)
     return await add_family_member(character_id, new_char["id"], relationship_label)
 

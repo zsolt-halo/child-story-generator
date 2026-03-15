@@ -12,6 +12,7 @@ import {
 import type { CharacterDetail, SSEEvent } from "../api/types";
 import { CharacterEditor } from "../components/CharacterEditor";
 import { FamilyTreeSection } from "../components/FamilyTreeSection";
+import { RefineRefSheetPanel } from "../components/RefineRefSheetPanel";
 import { useSSE } from "../hooks/useSSE";
 
 type PanelMode =
@@ -37,6 +38,7 @@ export function Characters() {
 
   const templates = characters?.filter((c) => c.is_template) ?? [];
   const custom = characters?.filter((c) => !c.is_template) ?? [];
+  const hierarchy = buildSidebarHierarchy(custom);
 
   const selectedChar =
     panel.kind === "view" || panel.kind === "edit"
@@ -176,16 +178,33 @@ export function Characters() {
                   </span>
                 </div>
                 {custom.length > 0 ? (
-                  custom.map((char) => (
-                    <SidebarItem
-                      key={char.id ?? char.slug}
-                      character={char}
-                      selected={
-                        (panel.kind === "view" || panel.kind === "edit") &&
-                        panel.id === (char.id ?? char.slug)
-                      }
-                      onClick={() => selectChar(char)}
-                    />
+                  hierarchy.map((entry) => (
+                    <div key={entry.character.id ?? entry.character.slug}>
+                      <SidebarItem
+                        character={entry.character}
+                        selected={
+                          (panel.kind === "view" || panel.kind === "edit") &&
+                          panel.id === (entry.character.id ?? entry.character.slug)
+                        }
+                        onClick={() => selectChar(entry.character)}
+                      />
+                      {entry.members.length > 0 && (
+                        <div className="ml-6 mr-2 border-l border-bark-200">
+                          {entry.members.map((m) => (
+                            <NestedSidebarItem
+                              key={m.character.id ?? m.character.slug}
+                              character={m.character}
+                              relationshipLabel={m.relationshipLabel}
+                              selected={
+                                (panel.kind === "view" || panel.kind === "edit") &&
+                                panel.id === (m.character.id ?? m.character.slug)
+                              }
+                              onClick={() => selectChar(m.character)}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   ))
                 ) : (
                   <div className="px-4 py-6 text-center">
@@ -311,6 +330,65 @@ export function Characters() {
   );
 }
 
+/* ── Sidebar Hierarchy ── */
+
+interface SidebarEntry {
+  character: CharacterDetail;
+  members: { character: CharacterDetail; relationshipLabel: string }[];
+}
+
+function buildSidebarHierarchy(characters: CharacterDetail[]): SidebarEntry[] {
+  const byId = new Map<string, CharacterDetail>();
+  for (const c of characters) {
+    if (c.id) byId.set(c.id, c);
+  }
+
+  // Collect all member IDs that are nested under a protagonist
+  const nestedIds = new Set<string>();
+  // Characters that have family_members are "protagonists"
+  const protagonistIds = new Set<string>();
+  for (const c of characters) {
+    if (c.family_members && c.family_members.length > 0 && c.id) {
+      protagonistIds.add(c.id);
+    }
+  }
+
+  // Figure out which members should be nested (not themselves protagonists)
+  for (const c of characters) {
+    if (!c.family_members) continue;
+    for (const fm of c.family_members) {
+      if (!protagonistIds.has(fm.member_id)) {
+        nestedIds.add(fm.member_id);
+      }
+    }
+  }
+
+  const entries: SidebarEntry[] = [];
+  for (const c of characters) {
+    // Skip characters that are nested under someone else
+    if (c.id && nestedIds.has(c.id)) continue;
+
+    const members: SidebarEntry["members"] = [];
+    if (c.family_members) {
+      for (const fm of c.family_members) {
+        // Only nest members that aren't themselves protagonists
+        if (protagonistIds.has(fm.member_id)) continue;
+        const memberChar = byId.get(fm.member_id);
+        if (memberChar) {
+          members.push({
+            character: memberChar,
+            relationshipLabel: fm.relationship_label,
+          });
+        }
+      }
+    }
+
+    entries.push({ character: c, members });
+  }
+
+  return entries;
+}
+
 /* ── Palette Avatar ── */
 
 function PaletteAvatar({
@@ -409,6 +487,52 @@ function SidebarItem({
   );
 }
 
+/* ── Nested Sidebar Item (family member) ── */
+
+function NestedSidebarItem({
+  character,
+  relationshipLabel,
+  selected,
+  onClick,
+}: {
+  character: CharacterDetail;
+  relationshipLabel: string;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`w-full flex items-center gap-2.5 pl-3 pr-3 py-2 text-left transition-colors ${
+        selected
+          ? "bg-sage-50 border-r-2 border-r-sage-500"
+          : "hover:bg-bark-50"
+      }`}
+    >
+      {character.reference_sheet_url ? (
+        <img
+          src={`${character.reference_sheet_url}?w=200`}
+          alt={character.name}
+          className="w-7 h-7 rounded-full object-cover shrink-0"
+        />
+      ) : (
+        <PaletteAvatar palette={character.visual.color_palette} size={28} className="rounded-full" />
+      )}
+      <div className="min-w-0 flex-1">
+        <span
+          className={`text-xs font-medium truncate block ${
+            selected ? "text-bark-800" : "text-bark-600"
+          }`}
+        >
+          {character.name}
+        </span>
+        <p className="text-[10px] text-bark-400 truncate">{relationshipLabel}</p>
+      </div>
+    </button>
+  );
+}
+
 /* ── Detail Panel (read-only view) ── */
 
 function DetailPanel({
@@ -445,6 +569,7 @@ function DetailPanel({
     initialGenTaskId ? "Generating reference sheet..." : null
   );
   const [localRefUrl, setLocalRefUrl] = useState<string | null>(null);
+  const [showRefine, setShowRefine] = useState(false);
 
   const identifier = character.is_template ? character.slug : character.id!;
   const refSheetUrl = localRefUrl ?? character.reference_sheet_url;
@@ -521,13 +646,29 @@ function DetailPanel({
           />
           <div className="px-4 py-2.5 flex items-center justify-between border-t border-bark-100">
             <span className="text-[10px] font-semibold text-bark-400 uppercase tracking-wider">Reference Sheet</span>
-            <button
-              onClick={handleGenerate}
-              disabled={generating}
-              className="text-[11px] font-medium text-sage-600 hover:text-sage-700 disabled:opacity-50 transition-colors"
-            >
-              {generating ? "Regenerating..." : "Regenerate"}
-            </button>
+            <div className="flex items-center gap-2">
+              {/* Custom characters get the full Refine panel; templates get plain Regenerate */}
+              {character.id && !character.is_template ? (
+                <button
+                  onClick={() => setShowRefine((v) => !v)}
+                  disabled={generating}
+                  className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-amber-600 hover:text-amber-700 disabled:opacity-50 transition-colors"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182M2.985 19.644l3.181-3.182" />
+                  </svg>
+                  {showRefine ? "Close" : "Refine"}
+                </button>
+              ) : (
+                <button
+                  onClick={handleGenerate}
+                  disabled={generating}
+                  className="text-[11px] font-medium text-sage-600 hover:text-sage-700 disabled:opacity-50 transition-colors"
+                >
+                  {generating ? "Regenerating..." : "Regenerate"}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       ) : (
@@ -564,6 +705,22 @@ function DetailPanel({
         </div>
       )}
 
+      {/* Refine panel (photo-based characters) */}
+      {showRefine && character.id && !character.is_template && (
+        <div className="mb-6">
+          <RefineRefSheetPanel
+            character={character}
+            currentRefSheetUrl={refSheetUrl}
+            onAccepted={() => {
+              setShowRefine(false);
+              setLocalRefUrl(null);
+              onRefSheetGenerated();
+            }}
+            onClose={() => setShowRefine(false)}
+          />
+        </div>
+      )}
+
       {/* Hero header with avatar */}
       <div className="flex items-start gap-5 mb-8">
         <PaletteAvatar palette={palette} size={72} className="rounded-full shadow-md ring-2 ring-white" />
@@ -583,7 +740,9 @@ function DetailPanel({
               </span>
             )}
           </div>
-          <p className="text-sm text-bark-400">for {character.child_name}</p>
+          <p className="text-sm text-bark-400">
+            for {character.child_name}{character.age ? ` \u00b7 ${character.age}` : ""}
+          </p>
 
           {/* Color palette swatches */}
           {palette.length > 0 && (

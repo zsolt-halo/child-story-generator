@@ -20,6 +20,7 @@ def _row_to_character(row: CharacterRow) -> Character:
     return Character(
         name=row.name,
         child_name=row.child_name,
+        age=row.age,
         personality=CharacterPersonality(
             traits=row.traits or [],
             speech_style=row.speech_style or "",
@@ -42,6 +43,7 @@ def _character_to_row(char: Character, slug: str, is_template: bool = False) -> 
         slug=slug,
         name=char.name,
         child_name=char.child_name,
+        age=char.age,
         traits=char.personality.traits,
         speech_style=char.personality.speech_style,
         visual_desc=char.visual.description,
@@ -118,6 +120,7 @@ class CharacterRepository:
             row.slug = slug
             row.name = char.name
             row.child_name = char.child_name
+            row.age = char.age
             row.traits = char.personality.traits
             row.speech_style = char.personality.speech_style
             row.visual_desc = char.visual.description

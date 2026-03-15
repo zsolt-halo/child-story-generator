@@ -224,11 +224,18 @@ export interface CharacterStoryRules {
   never: string;
 }
 
+export interface FamilyMemberSummary {
+  member_id: string;
+  name: string;
+  relationship_label: string;
+}
+
 export interface CharacterDetail {
   id: string | null;
   slug: string;
   name: string;
   child_name: string;
+  age: string | null;
   personality: CharacterPersonality;
   visual: CharacterVisual;
   story_rules: CharacterStoryRules;
@@ -238,6 +245,7 @@ export interface CharacterDetail {
   has_photo: boolean;
   photo_url: string | null;
   family_member_count: number;
+  family_members: FamilyMemberSummary[];
 }
 
 export interface FamilyMemberInfo {
@@ -255,6 +263,7 @@ export interface CharacterCreateRequest {
   slug: string;
   name: string;
   child_name: string;
+  age?: string;
   personality: CharacterPersonality;
   visual: CharacterVisual;
   story_rules: CharacterStoryRules;

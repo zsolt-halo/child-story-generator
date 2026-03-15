@@ -20,6 +20,8 @@ interface CharacterEditorProps {
   onCancel?: () => void;
   mode: "create" | "edit";
   onPhotoChanged?: () => void;
+  /** When "family-member", adjusts labels so they don't assume "child" */
+  variant?: "character" | "family-member";
 }
 
 function toSlug(text: string): string {
@@ -174,7 +176,8 @@ function ColorPaletteEditor({
    Main editor
    ═══════════════════════════════════════════════════════════════════════ */
 
-export function CharacterEditor({ initialData, onSave, onCancel, mode, onPhotoChanged }: CharacterEditorProps) {
+export function CharacterEditor({ initialData, onSave, onCancel, mode, onPhotoChanged, variant = "character" }: CharacterEditorProps) {
+  const isFamilyMember = variant === "family-member";
   // Determine initial kind from existing data
   const initialKind: CharacterKind = initialData?.has_photo ? "real" : "imagined";
   const [kind, setKind] = useState<CharacterKind>(initialKind);
@@ -182,6 +185,7 @@ export function CharacterEditor({ initialData, onSave, onCancel, mode, onPhotoCh
 
   const [name, setName] = useState(initialData?.name ?? "");
   const [childName, setChildName] = useState(initialData?.child_name ?? "");
+  const [age, setAge] = useState(initialData?.age ?? "");
   const [slug, setSlug] = useState(initialData?.slug ?? "");
   const [slugManual, setSlugManual] = useState(false);
 
@@ -317,6 +321,7 @@ export function CharacterEditor({ initialData, onSave, onCancel, mode, onPhotoCh
         slug,
         name,
         child_name: childName,
+        age: age || undefined,
         personality,
         visual,
         story_rules: storyRules,
@@ -325,7 +330,7 @@ export function CharacterEditor({ initialData, onSave, onCancel, mode, onPhotoCh
     );
   };
 
-  const polishDisabled = !name || !childName || roughDescription.length < 10 || polishing;
+  const polishDisabled = !name || (!isFamilyMember && !childName) || roughDescription.length < 10 || polishing;
 
   /* ── Kind selector (step 0) ── */
   const selectKind = (k: CharacterKind) => {
@@ -373,10 +378,13 @@ export function CharacterEditor({ initialData, onSave, onCancel, mode, onPhotoCh
                 <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0z" />
               </svg>
             </div>
-            <h3 className="text-sm font-bold text-bark-800 mb-1">Based on My Child</h3>
+            <h3 className="text-sm font-bold text-bark-800 mb-1">
+              {isFamilyMember ? "Based on a Real Person" : "Based on My Child"}
+            </h3>
             <p className="text-xs text-bark-400 leading-relaxed">
-              Upload a photo and we'll create a cartoon character that looks like your child.
-              Uses our best AI model for likeness.
+              {isFamilyMember
+                ? "Upload a photo and we'll create a cartoon character that captures their likeness. Uses our best AI model."
+                : "Upload a photo and we'll create a cartoon character that looks like your child. Uses our best AI model for likeness."}
             </p>
             <div className="absolute top-4 right-4 w-6 h-6 rounded-full border-2 border-bark-200 group-hover:border-amber-400 group-hover:bg-amber-50 transition-colors" />
           </button>
@@ -441,8 +449,9 @@ export function CharacterEditor({ initialData, onSave, onCancel, mode, onPhotoCh
             <div>
               <h3 className="text-sm font-bold text-bark-800">Reference Photo</h3>
               <p className="text-xs text-bark-400 mt-0.5">
-                Upload a clear photo of your child's face. We'll use our best AI to create a cartoon
-                version that captures their likeness.
+                {isFamilyMember
+                  ? "Upload a clear photo of their face. We'll use our best AI to create a cartoon version that captures their likeness."
+                  : "Upload a clear photo of your child's face. We'll use our best AI to create a cartoon version that captures their likeness."}
               </p>
             </div>
           </div>
@@ -553,8 +562,8 @@ export function CharacterEditor({ initialData, onSave, onCancel, mode, onPhotoCh
             </button>
             {polishDisabled && !polishing && (
               <span className="text-xs text-bark-400">
-                {!name || !childName
-                  ? "Fill in name and child's name first"
+                {!name || (!isFamilyMember && !childName)
+                  ? isFamilyMember ? "Fill in name first" : "Fill in name and child's name first"
                   : "Description must be at least 10 characters"}
               </span>
             )}
@@ -579,20 +588,37 @@ export function CharacterEditor({ initialData, onSave, onCancel, mode, onPhotoCh
           />
           {kind === "real" && (
             <span className="text-[10px] text-bark-400 mt-1 block">
-              Your child's name or a storybook name for them
+              {isFamilyMember ? "Their real name or a storybook name" : "Your child's name or a storybook name for them"}
             </span>
           )}
         </label>
 
+        {/* Hidden for family members — backend inherits child_name from parent character */}
+        {!isFamilyMember && (
+          <label className="block">
+            <span className={labelCls}>Child's Name</span>
+            <input
+              type="text"
+              value={childName}
+              onChange={(e) => setChildName(e.target.value)}
+              placeholder="Lana"
+              className={`mt-1.5 ${inputCls}`}
+            />
+          </label>
+        )}
+
         <label className="block">
-          <span className={labelCls}>Child's Name</span>
+          <span className={labelCls}>Age</span>
           <input
             type="text"
-            value={childName}
-            onChange={(e) => setChildName(e.target.value)}
-            placeholder="Lana"
+            value={age}
+            onChange={(e) => setAge(e.target.value)}
+            placeholder="3 years"
             className={`mt-1.5 ${inputCls}`}
           />
+          <span className="text-[10px] text-bark-400 mt-1 block">
+            Helps generate age-appropriate reference sheets
+          </span>
         </label>
 
         <label className="block">

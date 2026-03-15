@@ -133,6 +133,7 @@ class CharacterRow(Base):
     slug: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     child_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    age: Mapped[str | None] = mapped_column(String(40), nullable=True)
     traits: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
     speech_style: Mapped[str | None] = mapped_column(Text, nullable=True)
     visual_desc: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -195,7 +196,7 @@ class FamilyLinkRow(Base):
         "CharacterRow", foreign_keys=[character_id]
     )
     member: Mapped[CharacterRow] = relationship(
-        "CharacterRow", foreign_keys=[member_id]
+        "CharacterRow", foreign_keys=[member_id], lazy="joined"
     )
 
 

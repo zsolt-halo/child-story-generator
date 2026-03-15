@@ -156,11 +156,18 @@ class SanityCheckResult(BaseModel):
     suggested_visual_description: str | None = None
 
 
+class FamilyMemberSummary(BaseModel):
+    member_id: str
+    name: str
+    relationship_label: str
+
+
 class CharacterDetail(BaseModel):
     id: str | None = None  # None for TOML templates
     slug: str
     name: str
     child_name: str
+    age: str | None = None
     personality: CharacterPersonalitySchema
     visual: CharacterVisualSchema
     story_rules: CharacterStoryRulesSchema
@@ -170,12 +177,14 @@ class CharacterDetail(BaseModel):
     has_photo: bool = False
     photo_url: str | None = None
     family_member_count: int = 0
+    family_members: list[FamilyMemberSummary] = []
 
 
 class CharacterCreateRequest(BaseModel):
     slug: str
     name: str
     child_name: str
+    age: str | None = None
     personality: CharacterPersonalitySchema
     visual: CharacterVisualSchema
     story_rules: CharacterStoryRulesSchema
@@ -185,6 +194,7 @@ class CharacterUpdateRequest(BaseModel):
     slug: str | None = None
     name: str | None = None
     child_name: str | None = None
+    age: str | None = None
     personality: CharacterPersonalitySchema | None = None
     visual: CharacterVisualSchema | None = None
     story_rules: CharacterStoryRulesSchema | None = None

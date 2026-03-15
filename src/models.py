@@ -22,6 +22,7 @@ class CharacterStoryRules(BaseModel):
 class Character(BaseModel):
     name: str
     child_name: str
+    age: str | None = None
     personality: CharacterPersonality
     visual: CharacterVisual
     story_rules: CharacterStoryRules

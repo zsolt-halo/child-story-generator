@@ -289,14 +289,15 @@ def generate_reference_sheet(
         logger.info("Photo-based ref sheet: %d bytes for %s", len(photo), character.name)
         constants_note = f" They always wear/have: {character.visual.constants}." if character.visual.constants else ""
         color_note = _format_color_palette(character.visual.color_palette)
+        age_note = f" They are {character.age} old." if character.age else ""
         prompt = (
-            f"This photo shows a real child named {character.name}. "
+            f"This photo shows a real person named {character.name}. "
             f"Create a CHARACTER MODEL SHEET for a children's picture book based on this photo. "
-            f"{character.name} is a HUMAN CHILD — do NOT draw an animal, creature, or anything non-human. "
+            f"{character.name} is a HUMAN — do NOT draw an animal, creature, or anything non-human.{age_note} "
             f"Carefully match their exact hair color, hairstyle, eye color, skin tone, face shape, "
             f"and any distinctive features from the photo. "
             f"Draw {character.name} as a warm, appealing {style_anchor} cartoon — stylized but "
-            f"unmistakably the same child from the photo. "
+            f"unmistakably the same person from the photo. "
             f"Show multiple poses: front view, three-quarter view, side view, "
             f"and 2-3 expressions (happy, surprised, thoughtful). "
             f"Clean white background. No other characters. No scenery. No animals."
@@ -318,9 +319,10 @@ def generate_reference_sheet(
     else:
         species = _infer_species(character)
         anatomy_note = get_anatomy_note(species)
+        age_note = f" Age: {character.age}." if character.age else ""
         prompt = (
             f"Character model sheet / reference sheet for a children's book character "
-            f"named {character.name}. "
+            f"named {character.name}.{age_note} "
             f"Show the character in multiple poses: front view, three-quarter view, side view, "
             f"plus 2-3 facial expressions (happy, surprised, thoughtful). "
             f"Clean white background, no other characters, no scenery. "
