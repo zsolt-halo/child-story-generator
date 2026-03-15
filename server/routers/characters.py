@@ -12,6 +12,11 @@ from server.schemas import (
     CharacterPolishRequest,
     CharacterPolishResponse,
     TaskResponse,
+    FamilyMemberInfo,
+    AddFamilyMemberRequest,
+    CreateAndLinkFamilyMemberRequest,
+    UpdateFamilyLinkRequest,
+    ReorderFamilyRequest,
 )
 from server.services import character_service
 from server.services.task_manager import task_manager
@@ -272,6 +277,64 @@ async def generate_reference_sheet(identifier: str):
         exclusive=True,
     )
     return TaskResponse(task_id=task_id)
+
+
+# ---------------------------------------------------------------------------
+# Family tree endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{id}/family", response_model=list[FamilyMemberInfo])
+async def list_family(id: str):
+    """List all family members for a character."""
+    try:
+        return await character_service.get_family_tree(id)
+    except Exception as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/{id}/family", response_model=FamilyMemberInfo, status_code=201)
+async def add_family_member(id: str, req: AddFamilyMemberRequest):
+    """Link an existing character as a family member."""
+    try:
+        return await character_service.add_family_member(id, req.member_id, req.relationship_label)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/{id}/family/create", response_model=FamilyMemberInfo, status_code=201)
+async def create_and_link_family_member(id: str, req: CreateAndLinkFamilyMemberRequest):
+    """Create a new character and link it as a family member."""
+    try:
+        return await character_service.create_and_link_family_member(
+            id, req.character.model_dump(), req.relationship_label,
+        )
+    except Exception as e:
+        raise HTTPException(400, str(e))
+
+
+@router.put("/{id}/family/{link_id}", response_model=FamilyMemberInfo)
+async def update_family_link(id: str, link_id: str, req: UpdateFamilyLinkRequest):
+    """Update a family link's label or sort order."""
+    data = {k: v for k, v in req.model_dump().items() if v is not None}
+    try:
+        return await character_service.update_family_link(link_id, data)
+    except FileNotFoundError:
+        raise HTTPException(404, "Family link not found")
+
+
+@router.delete("/{id}/family/{link_id}", status_code=204)
+async def remove_family_member(id: str, link_id: str):
+    """Remove a family link."""
+    await character_service.remove_family_member(link_id)
+
+
+@router.put("/{id}/family/reorder", response_model=list[FamilyMemberInfo])
+async def reorder_family(id: str, req: ReorderFamilyRequest):
+    """Reorder family members."""
+    return await character_service.reorder_family(id, req.ordered_member_ids)
 
 
 def _looks_like_uuid(value: str) -> bool:

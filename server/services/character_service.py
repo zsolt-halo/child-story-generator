@@ -28,6 +28,7 @@ def _template_char_dir(slug: str) -> "Path":
 
 def _row_to_dict(row) -> dict:
     """Convert a CharacterRow to an API-friendly dict."""
+    family_count = len(row.family_links) if hasattr(row, "family_links") and row.family_links else 0
     return {
         "id": str(row.id),
         "slug": row.slug,
@@ -51,6 +52,7 @@ def _row_to_dict(row) -> dict:
         "reference_sheet_url": f"/api/characters/{row.id}/reference-sheet" if row.has_reference_sheet else None,
         "has_photo": bool(row.photo_path),
         "photo_url": f"/api/characters/{row.id}/photo" if row.photo_path else None,
+        "family_member_count": family_count,
     }
 
 
@@ -297,3 +299,77 @@ async def generate_character_reference_sheet(task_id: str, identifier: str, slug
         "type": "reference_sheet_complete",
         "url": url,
     })
+
+
+# ---------------------------------------------------------------------------
+# Family tree management
+# ---------------------------------------------------------------------------
+
+def _link_to_info(link) -> dict:
+    """Convert a FamilyLinkRow (with eager-loaded member) to FamilyMemberInfo dict."""
+    member = link.member
+    ref_url = f"/api/characters/{member.id}/reference-sheet" if member.has_reference_sheet else None
+    return {
+        "link_id": str(link.id),
+        "member_id": str(member.id),
+        "member_pipeline_id": f"custom:{member.id}",
+        "member_name": member.name,
+        "relationship_label": link.relationship_label,
+        "sort_order": link.sort_order,
+        "reference_sheet_url": ref_url,
+        "color_palette": member.color_palette or [],
+    }
+
+
+async def get_family_tree(character_id: str) -> list[dict]:
+    """List all family members for a character."""
+    from src.db.family_repository import FamilyRepository
+    links = await FamilyRepository().async_list_members(uuid.UUID(character_id))
+    return [_link_to_info(link) for link in links]
+
+
+async def add_family_member(character_id: str, member_id: str, relationship_label: str) -> dict:
+    """Link an existing character as a family member."""
+    from src.db.family_repository import FamilyRepository
+    # Get current count for sort_order
+    links = await FamilyRepository().async_list_members(uuid.UUID(character_id))
+    sort_order = len(links)
+    link = await FamilyRepository().async_add_member(
+        uuid.UUID(character_id), uuid.UUID(member_id), relationship_label, sort_order,
+    )
+    return _link_to_info(link)
+
+
+async def remove_family_member(link_id: str) -> None:
+    """Remove a family link."""
+    from src.db.family_repository import FamilyRepository
+    await FamilyRepository().async_remove_member(uuid.UUID(link_id))
+
+
+async def update_family_link(link_id: str, data: dict) -> dict:
+    """Update a family link's label/sort_order."""
+    from src.db.family_repository import FamilyRepository
+    link = await FamilyRepository().async_update_link(
+        uuid.UUID(link_id),
+        relationship_label=data.get("relationship_label"),
+        sort_order=data.get("sort_order"),
+    )
+    return _link_to_info(link)
+
+
+async def create_and_link_family_member(
+    character_id: str, char_data: dict, relationship_label: str
+) -> dict:
+    """Create a new character and link it as a family member in one step."""
+    new_char = await create_character(char_data)
+    return await add_family_member(character_id, new_char["id"], relationship_label)
+
+
+async def reorder_family(character_id: str, ordered_member_ids: list[str]) -> list[dict]:
+    """Reorder family members."""
+    from src.db.family_repository import FamilyRepository
+    links = await FamilyRepository().async_reorder(
+        uuid.UUID(character_id),
+        [uuid.UUID(mid) for mid in ordered_member_ids],
+    )
+    return [_link_to_info(link) for link in links]

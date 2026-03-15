@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
-import { listStories, deleteStory, listPresets, listAllCharacters, startAutoGenerate, deletePreset, updatePreset } from "../api/client";
+import { listStories, deleteStory, listPresets, listAllCharacters, startAutoGenerate, deletePreset, updatePreset, getFamilyTree } from "../api/client";
 import { StoryCard } from "../components/StoryCard";
 import { PresetCard } from "../components/PresetCard";
 import { WelcomeHero } from "../components/WelcomeHero";
@@ -53,6 +53,18 @@ export function Dashboard() {
   const handleGenerateFromPreset = async (preset: PresetDetail) => {
     setGeneratingPresetId(preset.id);
     try {
+      // If the character has a family tree, include all members by default
+      let familyOpts: { family_member_ids?: string[] } = {};
+      const char = characters?.find((c) => c.pipeline_id === preset.character);
+      if (char?.id && (char.family_member_count ?? 0) > 0) {
+        try {
+          const familyTree = await getFamilyTree(char.id);
+          if (familyTree.length > 0) {
+            familyOpts.family_member_ids = familyTree.map((m) => m.member_id);
+          }
+        } catch { /* ignore — proceed without family */ }
+      }
+
       const res = await startAutoGenerate({
         character: preset.character,
         narrator: preset.narrator,
@@ -60,6 +72,7 @@ export function Dashboard() {
         pages: preset.pages,
         language: preset.language || undefined,
         text_model: preset.text_model,
+        ...familyOpts,
       });
       setTaskId(res.task_id);
       navigate("/stories/_/pipeline", { state: { taskId: res.task_id } });

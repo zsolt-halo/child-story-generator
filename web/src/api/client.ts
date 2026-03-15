@@ -17,6 +17,7 @@ import type {
   PresetDetail,
   PresetCreateRequest,
   PresetUpdateRequest,
+  FamilyMemberInfo,
 } from "./types";
 
 const BASE = "/api";
@@ -136,6 +137,20 @@ export const uploadCharacterPhoto = async (id: string, file: File): Promise<Char
 
 export const deleteCharacterPhoto = (id: string) =>
   request(`/characters/${id}/photo`, { method: "DELETE" });
+
+// Family tree
+export const getFamilyTree = (charId: string) =>
+  request<FamilyMemberInfo[]>(`/characters/${charId}/family`);
+export const addFamilyMember = (charId: string, data: { member_id: string; relationship_label: string }) =>
+  request<FamilyMemberInfo>(`/characters/${charId}/family`, { method: "POST", body: JSON.stringify(data) });
+export const createAndLinkFamilyMember = (charId: string, data: { character: CharacterCreateRequest; relationship_label: string }) =>
+  request<FamilyMemberInfo>(`/characters/${charId}/family/create`, { method: "POST", body: JSON.stringify(data) });
+export const removeFamilyMember = (charId: string, linkId: string) =>
+  request(`/characters/${charId}/family/${linkId}`, { method: "DELETE" });
+export const updateFamilyLink = (charId: string, linkId: string, data: { relationship_label?: string; sort_order?: number }) =>
+  request<FamilyMemberInfo>(`/characters/${charId}/family/${linkId}`, { method: "PUT", body: JSON.stringify(data) });
+export const reorderFamily = (charId: string, orderedMemberIds: string[]) =>
+  request<FamilyMemberInfo[]>(`/characters/${charId}/family/reorder`, { method: "PUT", body: JSON.stringify({ ordered_member_ids: orderedMemberIds }) });
 
 // Presets
 export const listPresets = () => request<PresetDetail[]>("/presets/");

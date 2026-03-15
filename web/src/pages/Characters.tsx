@@ -11,6 +11,7 @@ import {
 } from "../api/client";
 import type { CharacterDetail, SSEEvent } from "../api/types";
 import { CharacterEditor } from "../components/CharacterEditor";
+import { FamilyTreeSection } from "../components/FamilyTreeSection";
 import { useSSE } from "../hooks/useSSE";
 
 type PanelMode =
@@ -277,6 +278,11 @@ export function Characters() {
                 : null
             }
             onRefSheetGenerated={invalidate}
+            onNavigateToMember={(memberId) => {
+              setConfirmDelete(false);
+              setAutoGenTaskId(null);
+              setPanel({ kind: "view", id: memberId });
+            }}
           />
         )}
 
@@ -391,6 +397,11 @@ function SidebarItem({
               T
             </span>
           )}
+          {!character.is_template && character.family_member_count > 0 && (
+            <span className="shrink-0 px-1.5 py-px text-[9px] font-bold bg-amber-100 text-amber-600 rounded">
+              {character.family_member_count}
+            </span>
+          )}
         </div>
         <p className="text-[11px] text-bark-400 truncate">for {character.child_name}</p>
       </div>
@@ -412,6 +423,7 @@ function DetailPanel({
   isDeleting,
   deleteError,
   onRefSheetGenerated,
+  onNavigateToMember,
 }: {
   character: CharacterDetail;
   initialGenTaskId?: string | null;
@@ -424,6 +436,7 @@ function DetailPanel({
   isDeleting: boolean;
   deleteError: string | null;
   onRefSheetGenerated: () => void;
+  onNavigateToMember?: (memberId: string) => void;
 }) {
   const palette = character.visual.color_palette;
   const [generating, setGenerating] = useState(!!initialGenTaskId);
@@ -675,6 +688,15 @@ function DetailPanel({
           </section>
         )}
       </div>
+
+      {/* Family Tree (custom characters only) */}
+      {!character.is_template && character.id && (
+        <FamilyTreeSection
+          characterId={character.id}
+          characterName={character.name}
+          onNavigateToMember={onNavigateToMember}
+        />
+      )}
 
       {/* Actions */}
       <div className="mt-8 flex items-center gap-3">

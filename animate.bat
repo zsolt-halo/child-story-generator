@@ -11,6 +11,7 @@ echo.
 if not defined BACKEND_URL set BACKEND_URL=http://localhost:8000,http://192.168.86.45:30082
 if not defined WORKER_TOKEN set WORKER_TOKEN=dev-token
 if not defined WAN_REPO set WAN_REPO=C:/Users/netzs/codes/Wan2.2
+if not defined AUTO_SHUTDOWN_MINUTES set AUTO_SHUTDOWN_MINUTES=5
 
 echo  Backends:  %BACKEND_URL%
 echo  Wan repo:  %WAN_REPO%

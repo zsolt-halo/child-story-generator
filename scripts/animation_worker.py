@@ -41,6 +41,7 @@ Config via env vars:
     WORKER_TOKEN  - Auth token (must match backend's WORKER_AUTH_TOKEN)
     WAN_REPO      - Path to Wan 2.2 source repo
     WAN_MODEL_DIR - Path to model weights (default: {WAN_REPO}/Wan2.2-TI2V-5B)
+    AUTO_SHUTDOWN_MINUTES - Minutes of idle time before system shutdown (0 = disabled)
 
 Usage:
     uv run scripts/animation_worker.py
@@ -142,6 +143,43 @@ def _allow_sleep():
     _wake_lock_held = False
 
 
+# Auto-shutdown state
+_shutdown_pending = False
+
+
+def _initiate_shutdown():
+    """Start an OS-level shutdown with 60s grace period."""
+    global _shutdown_pending
+    if _shutdown_pending:
+        return
+    _shutdown_pending = True
+    _allow_sleep()
+    console.print()
+    console.print(Panel(
+        "[bold yellow]System will shut down in 60 seconds.[/]\n"
+        "[dim]Run [bold]shutdown /a[/bold] in another terminal to cancel.[/]",
+        title="[bold red]Auto-Shutdown[/]",
+        border_style="red",
+    ))
+    if sys.platform == "win32":
+        os.system('shutdown /s /t 60 /c "StarlightScribe worker: idle auto-shutdown"')
+    else:
+        os.system("sudo shutdown -h +1")
+
+
+def _cancel_shutdown():
+    """Cancel a pending OS-level shutdown."""
+    global _shutdown_pending
+    if not _shutdown_pending:
+        return
+    _shutdown_pending = False
+    if sys.platform == "win32":
+        os.system("shutdown /a")
+    else:
+        os.system("sudo shutdown -c")
+    console.print("  [bold green]Shutdown cancelled[/] — new job received")
+
+
 # Configuration
 _raw_urls = os.environ.get("BACKEND_URL", "http://localhost:8000")
 BACKEND_URLS = [u.strip() for u in _raw_urls.split(",") if u.strip()]
@@ -155,6 +193,7 @@ HEARTBEAT_INTERVAL = 30  # seconds between heartbeats
 SIZE = "1280*704"
 SAMPLE_STEPS = int(os.environ.get("SAMPLE_STEPS", "30"))
 FRAME_NUM = int(os.environ.get("FRAME_NUM", "81"))
+AUTO_SHUTDOWN_MINUTES = int(os.environ.get("AUTO_SHUTDOWN_MINUTES", "0"))  # 0 = disabled
 
 _session = requests.Session()
 _session.headers["Authorization"] = f"Bearer {WORKER_TOKEN}"
@@ -336,6 +375,8 @@ def main():
     grid.add_row("[bold]Backends[/]", ", ".join(f"[cyan]{u}[/]" for u in BACKEND_URLS))
     grid.add_row("[bold]Model[/]", f"Wan TI2V-5B  [dim]{WAN_MODEL_DIR}[/]")
     grid.add_row("[bold]Output[/]", f"{SIZE}  {SAMPLE_STEPS} steps  {FRAME_NUM} frames")
+    if AUTO_SHUTDOWN_MINUTES > 0:
+        grid.add_row("[bold]Auto-shutdown[/]", f"After {AUTO_SHUTDOWN_MINUTES} min idle")
     console.print(Panel(grid, title="[bold magenta]StarlightScribe Animation Worker[/]", border_style="magenta", padding=(1, 2)))
 
     # Load model
@@ -366,14 +407,34 @@ def main():
         # Idle phase — release wake lock, show spinner
         _allow_sleep()
         with console.status("[dim]Waiting for animation jobs...[/]", spinner="dots", spinner_style="cyan") as status:
+            shutdown_triggered = False
             while True:
                 result = _poll()
                 if result:
+                    _cancel_shutdown()
                     break
-                if time.monotonic() - idle_since > 60:
-                    idle_dur = _fmt_duration(time.monotonic() - idle_since)
-                    status.update(f"[dim]Waiting for jobs... idle {idle_dur}[/]  [dim]|[/]  [green]{jobs_completed}[/] done  [red]{jobs_failed}[/] failed")
+
+                idle_dur_s = time.monotonic() - idle_since
+                stats_suffix = f"  [dim]|[/]  [green]{jobs_completed}[/] done  [red]{jobs_failed}[/] failed"
+
+                if AUTO_SHUTDOWN_MINUTES > 0:
+                    shutdown_at_s = AUTO_SHUTDOWN_MINUTES * 60
+                    remaining = shutdown_at_s - idle_dur_s
+                    if remaining <= 0:
+                        shutdown_triggered = True
+                        break
+                    elif remaining < 120:
+                        status.update(f"[bold yellow]Shutdown in {_fmt_duration(remaining)}[/]{stats_suffix}")
+                    else:
+                        status.update(f"[dim]Waiting... idle {_fmt_duration(idle_dur_s)}  (shutdown in {_fmt_duration(remaining)})[/]{stats_suffix}")
+                elif idle_dur_s > 60:
+                    status.update(f"[dim]Waiting for jobs... idle {_fmt_duration(idle_dur_s)}[/]{stats_suffix}")
+
                 time.sleep(POLL_INTERVAL)
+
+        if shutdown_triggered:
+            _initiate_shutdown()
+            break
 
         # Job received — prevent sleep
         _keep_awake()
@@ -514,6 +575,7 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
+        _cancel_shutdown()
         _allow_sleep()
         console.print("\n  [bold yellow]Interrupted[/] — shutting down gracefully")
         console.print("  [dim]Wake lock released, GPU idle[/]\n")

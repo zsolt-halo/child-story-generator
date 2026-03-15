@@ -1,4 +1,9 @@
-from src.models import Character, CastMember
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.models import Character, CastMember
 
 BODY_PLANS = {
     "quadruped": {
@@ -160,8 +165,32 @@ NARRATOR_PERSONAS = {
 }
 
 
-def build_storyteller_system_prompt(character: Character, narrator: str, style_desc: str) -> str:
+def _format_family_section_for_story(family_members: list[tuple[Character, str]] | None) -> str:
+    """Build a '## Family & Friends' section for the storyteller prompt."""
+    if not family_members:
+        return ""
+    lines = ["\n## Family & Friends",
+             "These characters are pre-defined and should be used when the notes mention them:"]
+    for char, label in family_members:
+        traits = ", ".join(char.personality.traits) if char.personality.traits else "friendly"
+        speech = char.personality.speech_style or ""
+        rule = char.story_rules.always or ""
+        line = f"- **{char.name}** ({label}): {traits}"
+        if speech:
+            line += f", speaks {speech}"
+        if rule:
+            line += f"\n  Story rule: {rule}"
+        lines.append(line)
+    lines.append("Keep their personalities consistent. Use their exact names.")
+    return "\n".join(lines)
+
+
+def build_storyteller_system_prompt(
+    character: Character, narrator: str, style_desc: str,
+    family_members: list[tuple[Character, str]] | None = None,
+) -> str:
     persona = NARRATOR_PERSONAS[narrator]
+    family_section = _format_family_section_for_story(family_members)
     return f"""You are StarlightScribe, a master children's book author.
 
 ## Your Task
@@ -181,7 +210,7 @@ The protagonist of every story is **{character.name}**.
 
 ## Art Style Context
 The book will be illustrated in a {style_desc} style. Keep visual descriptions compatible with this.
-
+{family_section}
 ## Guidelines
 - The story is a **grounded fantasy**: real events from the notes form the backbone, but told through {character.name}'s eyes with gentle embellishment. A trip to the park becomes an expedition to the Meadow of Wonders. Feeding ducks becomes a royal feast for the Lake Guardians.
 - Target length: 800-1500 words total, suitable for a 5-8 minute read-aloud.
@@ -236,8 +265,43 @@ def _infer_species(character: Character) -> str:
     return "character"
 
 
-def build_cast_extraction_prompt(character: Character) -> str:
+def build_cast_extraction_prompt(
+    character: Character,
+    family_members: list[tuple[Character, str]] | None = None,
+    allow_extra_cast: bool = True,
+) -> str:
     species = _infer_species(character)
+
+    family_section = ""
+    if family_members:
+        family_lines = [
+            "\n## Pre-Defined Family Members",
+            "These characters have canonical visual descriptions. If they appear in the story,",
+            "use their EXACT descriptions below — do NOT modify their appearance.\n",
+        ]
+        for char, label in family_members:
+            family_lines.append(
+                f"- **{char.name}** ({label}, {_infer_species(char)}):\n"
+                f"  Visual: {char.visual.description}, {char.visual.constants}"
+            )
+        family_lines.append(
+            "\nFor each pre-defined member that appears, include them in your output with their "
+            "canonical visual info and the pages they appear on."
+        )
+        family_section = "\n".join(family_lines)
+
+    extra_section = ""
+    if allow_extra_cast:
+        extra_section = """
+## Additional Characters
+If there are other secondary characters NOT in the pre-defined list above,
+create visual descriptions following the usual rules."""
+    elif family_members:
+        extra_section = """
+## Additional Characters: NONE
+Do NOT create any characters beyond the pre-defined family members.
+Only output family members who actually appear in the story."""
+
     return f"""You are a children's book art director ensuring visual consistency across all illustrations.
 
 ## Task
@@ -259,7 +323,8 @@ Match each character's body to their real species:
 - Quadrupeds (llama, cat, fox, etc.): 4 legs, no arms or hands.
 - Birds (owl, penguin, duck): 2 legs, 2 wings — wings are not arms.
 In visual_description, mention the limb structure. For accessories, only use items the animal can naturally wear or carry (e.g., a scarf, a satchel, a collar — not "holding a lantern in her hand").
-
+{family_section}
+{extra_section}
 ## Instructions
 For each secondary character you identify:
 1. **name**: Their name EXACTLY as it appears in the story — never rename characters (e.g., "Papa Llama", "Hedvig", "Bence")
@@ -381,9 +446,25 @@ Flesh out all character fields into a complete, detailed character profile:
 - If the character is an animal, state their body plan (e.g., "walks on four legs"). Don't describe hand-based actions for animals without hands."""
 
 
-def build_premise_prompt(character: Character) -> str:
+def build_premise_prompt(
+    character: Character,
+    family_members: list[tuple[Character, str]] | None = None,
+) -> str:
     """Build a system prompt for generating synthetic parent notes (Surprise Me mode)."""
     traits = ", ".join(character.personality.traits)
+
+    family_section = ""
+    if family_members:
+        family_lines = [
+            "\n## Family Members Available",
+            "These family members can appear in today's notes:",
+        ]
+        for char, label in family_members:
+            member_traits = ", ".join(char.personality.traits) if char.personality.traits else ""
+            family_lines.append(f"- {char.name} ({label}): {member_traits}")
+        family_lines.append("Include 1-3 of these family members naturally. Not every member needs to appear.")
+        family_section = "\n".join(family_lines)
+
     return f"""You are a creative parent jotting down quick notes about what your child did today. These notes will be turned into a children's picture book story.
 
 ## Your Child
@@ -391,7 +472,7 @@ def build_premise_prompt(character: Character) -> str:
 - Their storybook alter-ego: {character.name}
 - Personality traits: {traits}
 - Story rule: {character.story_rules.always}
-
+{family_section}
 ## Task
 Write 30-80 words of casual, jotted-down parent notes describing an interesting or fun thing {character.child_name} did today. Write as if you're a busy parent quickly typing notes into your phone — natural, informal, with concrete details.
 

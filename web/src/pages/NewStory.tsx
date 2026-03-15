@@ -6,6 +6,7 @@ import type { CharacterCreateRequest } from "../api/types";
 import { StyleCard } from "../components/StyleCard";
 import { LanguageSelect } from "../components/LanguageSelect";
 import { CharacterEditor } from "../components/CharacterEditor";
+import { FamilyMemberPicker } from "../components/FamilyMemberPicker";
 import { usePipelineStore } from "../stores/pipelineStore";
 
 const STEPS_MANUAL = ["Your Story", "Settings"];
@@ -60,6 +61,8 @@ export function NewStory() {
   const [saveAsPreset, setSaveAsPreset] = useState(false);
   const [presetName, setPresetName] = useState("");
   const [settingsExpanded, setSettingsExpanded] = useState(!saved.character);
+  const [familyMemberIds, setFamilyMemberIds] = useState<string[]>([]);
+  const [allowExtraCast, setAllowExtraCast] = useState(true);
 
   const [creatingCharacter, setCreatingCharacter] = useState(false);
   const queryClient = useQueryClient();
@@ -88,6 +91,11 @@ export function NewStory() {
   if (characters && characters.length > 0 && !character) {
     setCharacter(characters[0].pipeline_id);
   }
+
+  // Resolve character ID for family picker (custom characters have id, templates don't)
+  const selectedCharObj = characters?.find((c) => c.pipeline_id === character);
+  const selectedCharId = selectedCharObj?.id ?? null;
+  const hasFamilyTree = (selectedCharObj?.family_member_count ?? 0) > 0;
 
   const currentStepLabel = steps[step];
   const isAuto = mode === "auto";
@@ -121,6 +129,10 @@ export function NewStory() {
         queryClient.invalidateQueries({ queryKey: ["presets"] });
       }
 
+      const familyOpts = hasFamilyTree && familyMemberIds.length > 0
+        ? { family_member_ids: familyMemberIds, allow_extra_cast: allowExtraCast }
+        : {};
+
       if (mode === "auto") {
         const res = await startAutoGenerate({
           character,
@@ -129,6 +141,7 @@ export function NewStory() {
           pages,
           language: language || undefined,
           text_model: textModel,
+          ...familyOpts,
         });
         setTaskId(res.task_id);
         navigate("/stories/_/pipeline", { state: { taskId: res.task_id } });
@@ -141,6 +154,7 @@ export function NewStory() {
           pages,
           language: language || undefined,
           text_model: textModel,
+          ...familyOpts,
         });
         setTaskId(res.task_id);
         navigate("/stories/_/pipeline", { state: { taskId: res.task_id } });
@@ -345,6 +359,17 @@ export function NewStory() {
                     </div>
                   )}
                 </div>
+
+                {/* Family member picker — shown when selected character has family */}
+                {hasFamilyTree && selectedCharId && (
+                  <FamilyMemberPicker
+                    characterId={selectedCharId}
+                    selectedIds={familyMemberIds}
+                    onSelectionChange={setFamilyMemberIds}
+                    allowExtraCast={allowExtraCast}
+                    onAllowExtraCastChange={setAllowExtraCast}
+                  />
+                )}
 
                 {/* Art style — 2x2 grid */}
                 <div>

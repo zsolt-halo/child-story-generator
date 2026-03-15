@@ -7,13 +7,17 @@ from src.models import BookConfig, Character
 logger = logging.getLogger(__name__)
 
 
-def generate_story(notes: str, character: Character, config: BookConfig, style_desc: str) -> tuple[str, str]:
+def generate_story(
+    notes: str, character: Character, config: BookConfig, style_desc: str,
+    family_members: list[tuple[Character, str]] | None = None,
+) -> tuple[str, str]:
     """Generate an expanded story from raw notes. Returns (title, prose)."""
     logger.info("Generating story for %s (%d-page, narrator=%s)", character.child_name, config.pages, config.narrator)
     system_prompt = build_storyteller_system_prompt(
         character=character,
         narrator=config.narrator,
         style_desc=style_desc,
+        family_members=family_members,
     )
 
     user_prompt = (
@@ -33,10 +37,13 @@ def generate_story(notes: str, character: Character, config: BookConfig, style_d
     return title, prose
 
 
-def generate_premise(character: Character, config: BookConfig) -> str:
+def generate_premise(
+    character: Character, config: BookConfig,
+    family_members: list[tuple[Character, str]] | None = None,
+) -> str:
     """Generate synthetic parent notes for the Surprise Me mode."""
     logger.info("Generating premise for %s (%d-page)", character.child_name, config.pages)
-    system_prompt = build_premise_prompt(character)
+    system_prompt = build_premise_prompt(character, family_members=family_members)
     user_prompt = (
         f"Write today's notes about {character.child_name} "
         f"for a {config.pages}-page picture book story."

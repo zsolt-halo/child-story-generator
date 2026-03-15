@@ -143,6 +143,8 @@ export interface PipelineStartRequest {
   pages: number;
   language?: string;
   text_model?: string;
+  family_member_ids?: string[];
+  allow_extra_cast?: boolean;
 }
 
 export interface AutoPipelineRequest {
@@ -152,6 +154,8 @@ export interface AutoPipelineRequest {
   pages: number;
   language?: string;
   text_model?: string;
+  family_member_ids?: string[];
+  allow_extra_cast?: boolean;
 }
 
 export interface TaskResponse {
@@ -233,6 +237,18 @@ export interface CharacterDetail {
   reference_sheet_url: string | null;
   has_photo: boolean;
   photo_url: string | null;
+  family_member_count: number;
+}
+
+export interface FamilyMemberInfo {
+  link_id: string;
+  member_id: string;
+  member_pipeline_id: string;
+  member_name: string;
+  relationship_label: string;
+  sort_order: number;
+  reference_sheet_url: string | null;
+  color_palette: string[];
 }
 
 export interface CharacterCreateRequest {

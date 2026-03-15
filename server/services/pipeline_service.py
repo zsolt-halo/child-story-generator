@@ -144,6 +144,32 @@ class PipelineContext:
     story: Story | None = None
     image_paths: list[Path] = field(default_factory=list)
     story_dir: Path | None = None
+    family_members: list[tuple[Character, str]] = field(default_factory=list)
+    allow_extra_cast: bool = True
+
+
+async def _save_family_selection(slug: str, family_member_ids: list[str], allow_extra_cast: bool) -> None:
+    """Persist selected family IDs and allow_extra_cast flag on the story row."""
+    from src.db.engine import get_async_session_factory
+    from src.db.models import StoryRow
+    from sqlalchemy import select
+    async with get_async_session_factory()() as session:
+        result = await session.execute(select(StoryRow).where(StoryRow.slug == slug))
+        row = result.scalar_one_or_none()
+        if row:
+            row.selected_family_ids = [uuid.UUID(fid) for fid in family_member_ids]
+            row.allow_extra_cast = allow_extra_cast
+            await session.commit()
+
+
+async def _resolve_family_members(family_member_ids: list[str] | None) -> list[tuple[Character, str]]:
+    """Resolve family member IDs to (Character, relationship_label) tuples."""
+    if not family_member_ids:
+        return []
+    from src.db.family_repository import FamilyRepository
+    return await FamilyRepository().async_resolve_members(
+        [uuid.UUID(fid) for fid in family_member_ids]
+    )
 
 
 async def _load_pipeline_context(slug: str) -> PipelineContext:
@@ -155,10 +181,28 @@ async def _load_pipeline_context(slug: str) -> PipelineContext:
     style_anchor = style_data.get("anchor", style_data["description"])
     char = await async_resolve_character(config.character)
     language = meta["config"].get("language") if meta and meta.get("config") else None
+
+    # Resolve family members from story DB row
+    family_members: list[tuple[Character, str]] = []
+    allow_extra_cast = True
+    from src.db.engine import get_async_session_factory
+    from src.db.models import StoryRow
+    from sqlalchemy import select
+    async with get_async_session_factory()() as session:
+        result = await session.execute(select(StoryRow).where(StoryRow.slug == slug))
+        row = result.scalar_one_or_none()
+        if row and row.selected_family_ids:
+            family_members = await _resolve_family_members(
+                [str(fid) for fid in row.selected_family_ids]
+            )
+        if row:
+            allow_extra_cast = row.allow_extra_cast
+
     return PipelineContext(
         config=config, char=char, style_anchor=style_anchor,
         style_desc=style_data["description"], meta=meta, language=language,
         story=story, image_paths=image_paths, story_dir=story_dir,
+        family_members=family_members, allow_extra_cast=allow_extra_cast,
     )
 
 
@@ -277,6 +321,8 @@ async def run_full_pipeline(
     pages: int,
     language: str | None,
     text_model: str | None = None,
+    family_member_ids: list[str] | None = None,
+    allow_extra_cast: bool = True,
 ) -> dict:
     """Run the full pipeline: story → keyframes → translation → illustrations → PDF."""
     logger.info("run_full_pipeline: task=%s character=%s style=%s pages=%d", task_id, character, style, pages)
@@ -288,11 +334,12 @@ async def run_full_pipeline(
     style_data = load_style(config.style)
     style_desc = style_data["description"]
     style_anchor = style_data.get("anchor", style_desc)
+    family_members = await _resolve_family_members(family_member_ids)
 
     # Phase 1: Story
     from src.brain.storyteller import generate_story
     async with _phase(task_id, "story", "Generating story...") as r:
-        title, prose = await asyncio.to_thread(generate_story, notes, char, config, style_desc)
+        title, prose = await asyncio.to_thread(generate_story, notes, char, config, style_desc, family_members=family_members or None)
         r.update(title=title, word_count=len(prose.split()))
 
     # Phase 2: Keyframes
@@ -318,11 +365,19 @@ async def run_full_pipeline(
     slug = output_dir.name
     await _save(slug, story, metadata=metadata)
 
+    # Store family selection on story row
+    if family_member_ids:
+        await _save_family_selection(slug, family_member_ids, allow_extra_cast)
+
     # Phase 2.5: Cast Extraction
     from src.brain.cast_extractor import extract_cast
     story.cast = []
     async with _phase(task_id, "cast", "Analyzing character cast for consistency...") as r:
-        story = await asyncio.to_thread(extract_cast, story, char, config)
+        story = await asyncio.to_thread(
+            extract_cast, story, char, config,
+            family_members=family_members or None,
+            allow_extra_cast=allow_extra_cast,
+        )
         await _save(slug, story)
         r.update(cast_count=len(story.cast), members=[m.model_dump() for m in story.cast])
 
@@ -396,6 +451,8 @@ async def run_auto_pipeline(
     pages: int,
     language: str | None,
     text_model: str | None = None,
+    family_member_ids: list[str] | None = None,
+    allow_extra_cast: bool = True,
 ) -> dict:
     """Surprise Me: generate a premise then run the full pipeline end-to-end."""
     logger.info("run_auto_pipeline: task=%s character=%s style=%s pages=%d", task_id, character, style, pages)
@@ -407,17 +464,18 @@ async def run_auto_pipeline(
     style_data = load_style(config.style)
     style_desc = style_data["description"]
     style_anchor = style_data.get("anchor", style_desc)
+    family_members = await _resolve_family_members(family_member_ids)
 
     # Phase 0: Premise — generate synthetic parent notes
     from src.brain.storyteller import generate_premise
     async with _phase(task_id, "premise", "Imagining a story idea...") as r:
-        notes = await asyncio.to_thread(generate_premise, char, config)
+        notes = await asyncio.to_thread(generate_premise, char, config, family_members=family_members or None)
         r.update(notes=notes)
 
     # Phase 1: Story
     from src.brain.storyteller import generate_story
     async with _phase(task_id, "story", "Generating story...") as r:
-        title, prose = await asyncio.to_thread(generate_story, notes, char, config, style_desc)
+        title, prose = await asyncio.to_thread(generate_story, notes, char, config, style_desc, family_members=family_members or None)
         r.update(title=title, word_count=len(prose.split()))
 
     # Phase 2: Keyframes
@@ -443,11 +501,19 @@ async def run_auto_pipeline(
     slug = output_dir.name
     await _save(slug, story, metadata=metadata)
 
+    # Store family selection on story row
+    if family_member_ids:
+        await _save_family_selection(slug, family_member_ids, allow_extra_cast)
+
     # Phase 2.5: Cast Extraction
     from src.brain.cast_extractor import extract_cast
     story.cast = []
     async with _phase(task_id, "cast", "Analyzing character cast for consistency...") as r:
-        story = await asyncio.to_thread(extract_cast, story, char, config)
+        story = await asyncio.to_thread(
+            extract_cast, story, char, config,
+            family_members=family_members or None,
+            allow_extra_cast=allow_extra_cast,
+        )
         await _save(slug, story)
         r.update(cast_count=len(story.cast), members=[m.model_dump() for m in story.cast])
 
@@ -524,6 +590,8 @@ async def run_story_only(
     language: str | None = None,
     parent_slug: str | None = None,
     text_model: str | None = None,
+    family_member_ids: list[str] | None = None,
+    allow_extra_cast: bool = True,
 ) -> dict:
     """Run all pre-illustration phases and pause for unified review.
 
@@ -538,10 +606,11 @@ async def run_story_only(
     style_data = load_style(config.style)
     style_desc = style_data["description"]
     style_anchor = style_data.get("anchor", style_desc)
+    family_members = await _resolve_family_members(family_member_ids)
 
     from src.brain.storyteller import generate_story
     async with _phase(task_id, "story", "Generating story...") as r:
-        title, prose = await asyncio.to_thread(generate_story, notes, char, config, style_desc)
+        title, prose = await asyncio.to_thread(generate_story, notes, char, config, style_desc, family_members=family_members or None)
         r.update(title=title, word_count=len(prose.split()))
 
     from src.brain.keyframer import generate_keyframes
@@ -566,11 +635,19 @@ async def run_story_only(
     }
     await _save(slug, story, metadata=metadata)
 
+    # Store family selection on story row
+    if family_member_ids:
+        await _save_family_selection(slug, family_member_ids, allow_extra_cast)
+
     # Phase 2.5: Cast Extraction
     from src.brain.cast_extractor import extract_cast
     story.cast = []
     async with _phase(task_id, "cast", "Analyzing character cast for consistency...") as r:
-        story = await asyncio.to_thread(extract_cast, story, char, config)
+        story = await asyncio.to_thread(
+            extract_cast, story, char, config,
+            family_members=family_members or None,
+            allow_extra_cast=allow_extra_cast,
+        )
         await _save(slug, story)
         r.update(cast_count=len(story.cast), members=[m.model_dump() for m in story.cast])
 
@@ -664,7 +741,11 @@ async def run_cast_extraction(task_id: str, slug: str) -> dict:
 
     ctx.story.cast = []
     async with _phase(task_id, "cast", "Analyzing character cast for consistency...") as r:
-        ctx.story = await asyncio.to_thread(extract_cast, ctx.story, ctx.char, ctx.config)
+        ctx.story = await asyncio.to_thread(
+            extract_cast, ctx.story, ctx.char, ctx.config,
+            family_members=ctx.family_members or None,
+            allow_extra_cast=ctx.allow_extra_cast,
+        )
         await _save(slug, ctx.story, [str(p) for p in ctx.image_paths])
         r.update(cast_count=len(ctx.story.cast), members=[m.model_dump() for m in ctx.story.cast])
 

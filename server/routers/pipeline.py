@@ -22,6 +22,8 @@ async def start_full_pipeline(req: PipelineStartRequest):
         pages=req.pages,
         language=req.language,
         text_model=req.text_model,
+        family_member_ids=req.family_member_ids,
+        allow_extra_cast=req.allow_extra_cast,
         exclusive=True,
     )
     return TaskResponse(task_id=task_id)
@@ -38,6 +40,8 @@ async def start_story_only(req: PipelineStartRequest):
         pages=req.pages,
         language=req.language,
         text_model=req.text_model,
+        family_member_ids=req.family_member_ids,
+        allow_extra_cast=req.allow_extra_cast,
         exclusive=True,
     )
     return TaskResponse(task_id=task_id)
@@ -54,6 +58,8 @@ async def start_auto_pipeline(req: AutoPipelineRequest):
         pages=req.pages,
         language=req.language,
         text_model=req.text_model,
+        family_member_ids=req.family_member_ids,
+        allow_extra_cast=req.allow_extra_cast,
         exclusive=True,
     )
     return TaskResponse(task_id=task_id)
@@ -192,6 +198,8 @@ async def start_branch(slug: str, req: BranchRequest):
             language=req.language,
             parent_slug=slug,
             text_model=req.text_model,
+            family_member_ids=getattr(req, 'family_member_ids', None),
+            allow_extra_cast=getattr(req, 'allow_extra_cast', True),
             exclusive=True,
         )
 

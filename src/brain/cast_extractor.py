@@ -14,14 +14,21 @@ class CastList(BaseModel):
     members: list[CastMember]
 
 
-def extract_cast(story: Story, character: Character, config: BookConfig) -> Story:
+def extract_cast(
+    story: Story,
+    character: Character,
+    config: BookConfig,
+    family_members: list[tuple[Character, str]] | None = None,
+    allow_extra_cast: bool = True,
+) -> Story:
     """Phase 2.5: Extract secondary character cast and rewrite keyframe visual descriptions.
 
     Step 1: Identify all secondary characters with consistent visual descriptions.
-    Step 2: Rewrite each keyframe's visual_description to embed canonical cast visuals.
+    Step 2: For family members, override visuals with canonical data.
+    Step 3: Rewrite each keyframe's visual_description to embed canonical cast visuals.
     """
     # Step 1: Extract cast via structured output
-    system_prompt = build_cast_extraction_prompt(character)
+    system_prompt = build_cast_extraction_prompt(character, family_members, allow_extra_cast)
 
     keyframes_text = "\n\n".join(
         f"Page {kf.page_number}{' (COVER)' if kf.is_cover else ''}:\n"
@@ -47,13 +54,26 @@ def extract_cast(story: Story, character: Character, config: BookConfig) -> Stor
         if m.name.lower() != protagonist_name
     ]
 
+    # Step 2: Override visuals for family members with canonical data
+    if family_members:
+        family_by_name = {char.name.lower(): (char, label) for char, label in family_members}
+        for member in members:
+            family_match = family_by_name.get(member.name.lower())
+            if family_match:
+                fchar, flabel = family_match
+                member.visual_description = fchar.visual.description
+                member.visual_constants = fchar.visual.constants
+                if not member.role:
+                    member.role = flabel
+                logger.info("Overrode visuals for family member '%s' with canonical data", member.name)
+
     story.cast = members
     logger.info("Cast extracted: %d members (%s)", len(members), ", ".join(m.name for m in members))
 
     if not members:
         return story
 
-    # Step 2: Rewrite keyframe visual descriptions with canonical cast info
+    # Step 3: Rewrite keyframe visual descriptions with canonical cast info
     return rewrite_cast_visuals(story, character, config)
 
 

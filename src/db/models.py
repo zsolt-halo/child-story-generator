@@ -40,6 +40,12 @@ class StoryRow(Base):
     style: Mapped[str] = mapped_column(String(40), default="digital")
     pages: Mapped[int] = mapped_column(Integer, default=16)
     language: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    selected_family_ids: Mapped[list[uuid.UUID] | None] = mapped_column(
+        ARRAY(UUID(as_uuid=True)), nullable=True
+    )
+    allow_extra_cast: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False, server_default="true"
+    )
     has_images: Mapped[bool] = mapped_column(Boolean, default=False)
     has_pdf: Mapped[bool] = mapped_column(Boolean, default=False)
     has_video: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -147,6 +153,49 @@ class CharacterRow(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    family_links: Mapped[list[FamilyLinkRow]] = relationship(
+        "FamilyLinkRow",
+        foreign_keys="FamilyLinkRow.character_id",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="FamilyLinkRow.sort_order",
+    )
+
+
+class FamilyLinkRow(Base):
+    """Links a protagonist character to a family member character (star topology)."""
+    __tablename__ = "family_links"
+    __table_args__ = (
+        UniqueConstraint("character_id", "member_id", name="uq_family_link"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    character_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("characters.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    member_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("characters.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    relationship_label: Mapped[str] = mapped_column(String(100), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    character: Mapped[CharacterRow] = relationship(
+        "CharacterRow", foreign_keys=[character_id]
+    )
+    member: Mapped[CharacterRow] = relationship(
+        "CharacterRow", foreign_keys=[member_id]
     )
 
 

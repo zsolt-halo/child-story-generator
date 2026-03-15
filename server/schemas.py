@@ -32,6 +32,8 @@ class PipelineStartRequest(BaseModel):
     pages: int = 16
     language: str | None = None
     text_model: str | None = None
+    family_member_ids: list[str] | None = None
+    allow_extra_cast: bool = True
 
 
 class AutoPipelineRequest(BaseModel):
@@ -41,6 +43,8 @@ class AutoPipelineRequest(BaseModel):
     pages: int = 16
     language: str | None = None
     text_model: str | None = None
+    family_member_ids: list[str] | None = None
+    allow_extra_cast: bool = True
 
 
 class TranslateRequest(BaseModel):
@@ -165,6 +169,7 @@ class CharacterDetail(BaseModel):
     reference_sheet_url: str | None = None
     has_photo: bool = False
     photo_url: str | None = None
+    family_member_count: int = 0
 
 
 class CharacterCreateRequest(BaseModel):
@@ -216,3 +221,33 @@ class NarratorInfo(BaseModel):
     slug: str
     description: str
     example: str
+
+
+class FamilyMemberInfo(BaseModel):
+    link_id: str
+    member_id: str
+    member_pipeline_id: str
+    member_name: str
+    relationship_label: str
+    sort_order: int
+    reference_sheet_url: str | None = None
+    color_palette: list[str] = []
+
+
+class AddFamilyMemberRequest(BaseModel):
+    member_id: str
+    relationship_label: str
+
+
+class CreateAndLinkFamilyMemberRequest(BaseModel):
+    character: CharacterCreateRequest
+    relationship_label: str
+
+
+class UpdateFamilyLinkRequest(BaseModel):
+    relationship_label: str | None = None
+    sort_order: int | None = None
+
+
+class ReorderFamilyRequest(BaseModel):
+    ordered_member_ids: list[str]
