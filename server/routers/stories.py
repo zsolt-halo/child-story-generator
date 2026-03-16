@@ -134,9 +134,11 @@ async def serve_image(slug: str, filename: str, w: int | None = Query(None)):
         if not found:
             raise HTTPException(status_code=404, detail="Image not found")
 
+    headers = {"Cache-Control": "no-cache"}
+
     # No resize requested — serve full image
     if w is None:
-        return FileResponse(file_path, media_type="image/png")
+        return FileResponse(file_path, media_type="image/png", headers=headers)
 
     # Clamp to allowed widths
     width = min(ALLOWED_WIDTHS, key=lambda x: abs(x - w))
@@ -146,14 +148,19 @@ async def serve_image(slug: str, filename: str, w: int | None = Query(None)):
     stem = file_path.stem
     thumb_path = thumbs_dir / f"{stem}_w{width}.jpg"
 
+    # Prefer _raw.png (1024x1024) as source if it exists — smaller to decode
+    raw_path = file_path.with_name(f"{stem}_raw.png")
+    source = raw_path if raw_path.exists() else file_path
+
+    # Invalidate stale thumbnail (source was regenerated after thumbnail was cached)
+    if thumb_path.exists() and source.stat().st_mtime > thumb_path.stat().st_mtime:
+        thumb_path.unlink()
+
     if not thumb_path.exists():
-        # Prefer _raw.png (1024x1024) as source if it exists — smaller to decode
-        raw_path = file_path.with_name(f"{stem}_raw.png")
-        source = raw_path if raw_path.exists() else file_path
         thumbs_dir.mkdir(exist_ok=True)
         await asyncio.to_thread(generate_thumbnail, source, thumb_path, width)
 
-    return FileResponse(thumb_path, media_type="image/jpeg")
+    return FileResponse(thumb_path, media_type="image/jpeg", headers=headers)
 
 
 @router.get("/{slug}/videos/{filename}")
@@ -166,7 +173,7 @@ async def serve_video(slug: str, filename: str):
         found = await storage.ensure_local(key, file_path)
         if not found:
             raise HTTPException(status_code=404, detail="Video not found")
-    return FileResponse(file_path, media_type="video/mp4")
+    return FileResponse(file_path, media_type="video/mp4", headers={"Cache-Control": "no-cache"})
 
 
 @router.get("/{slug}/backdrops/{filename}")
@@ -179,7 +186,7 @@ async def serve_backdrop(slug: str, filename: str):
         found = await storage.ensure_local(key, file_path)
         if not found:
             raise HTTPException(status_code=404, detail="Backdrop not found")
-    return FileResponse(file_path, media_type="image/png")
+    return FileResponse(file_path, media_type="image/png", headers={"Cache-Control": "no-cache"})
 
 
 @router.get("/{slug}/pdf/{variant}")
@@ -201,4 +208,4 @@ async def serve_pdf(slug: str, variant: str):
         found = await storage.ensure_local(key, file_path)
         if not found:
             raise HTTPException(status_code=404, detail="PDF not found")
-    return FileResponse(file_path, media_type="application/pdf")
+    return FileResponse(file_path, media_type="application/pdf", headers={"Cache-Control": "no-cache"})

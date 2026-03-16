@@ -123,6 +123,10 @@ async def serve_template_reference_sheet(slug: str, w: int | None = Query(None))
     thumbs_dir = file_path.parent / ".thumbs"
     thumb_path = thumbs_dir / f"reference_sheet_w{width}.jpg"
 
+    # Invalidate stale thumbnail (source was regenerated after thumbnail was cached)
+    if thumb_path.exists() and file_path.stat().st_mtime > thumb_path.stat().st_mtime:
+        thumb_path.unlink()
+
     if not thumb_path.exists():
         thumbs_dir.mkdir(exist_ok=True)
         await asyncio.to_thread(generate_thumbnail, file_path, thumb_path, width)
@@ -155,6 +159,10 @@ async def serve_reference_sheet(id: str, w: int | None = Query(None)):
     width = min(ALLOWED_WIDTHS, key=lambda x: abs(x - w))
     thumbs_dir = file_path.parent / ".thumbs"
     thumb_path = thumbs_dir / f"reference_sheet_w{width}.jpg"
+
+    # Invalidate stale thumbnail (source was regenerated after thumbnail was cached)
+    if thumb_path.exists() and file_path.stat().st_mtime > thumb_path.stat().st_mtime:
+        thumb_path.unlink()
 
     if not thumb_path.exists():
         thumbs_dir.mkdir(exist_ok=True)
@@ -214,18 +222,24 @@ async def serve_photo(id: str, w: int | None = Query(None)):
         if not found:
             raise HTTPException(404, "Photo file not found")
 
+    headers = {"Cache-Control": "no-cache"}
+
     if w is None:
-        return FileResponse(file_path, media_type="image/png")
+        return FileResponse(file_path, media_type="image/png", headers=headers)
 
     width = min(ALLOWED_WIDTHS, key=lambda x: abs(x - w))
     thumbs_dir = file_path.parent / ".thumbs"
     thumb_path = thumbs_dir / f"photo_w{width}.jpg"
 
+    # Invalidate stale thumbnail (photo was re-uploaded after thumbnail was cached)
+    if thumb_path.exists() and file_path.stat().st_mtime > thumb_path.stat().st_mtime:
+        thumb_path.unlink()
+
     if not thumb_path.exists():
         thumbs_dir.mkdir(exist_ok=True)
         await asyncio.to_thread(generate_thumbnail, file_path, thumb_path, width)
 
-    return FileResponse(thumb_path, media_type="image/jpeg")
+    return FileResponse(thumb_path, media_type="image/jpeg", headers=headers)
 
 
 @router.delete("/{id}/photo", status_code=204)
