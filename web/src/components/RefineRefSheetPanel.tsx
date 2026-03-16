@@ -180,7 +180,7 @@ export function RefineRefSheetPanel({
             <div>
               <span className="text-[10px] font-semibold text-sage-600 uppercase tracking-wider block mb-1.5">New</span>
               <img
-                src={`${newRefUrl}?w=800&t=${Date.now()}`}
+                src={`${newRefUrl}?t=${Date.now()}`}
                 alt="New reference sheet"
                 className="w-full rounded-lg border-2 border-sage-300 shadow-md"
               />

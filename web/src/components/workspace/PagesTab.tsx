@@ -1,11 +1,10 @@
 import { useState, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { updateStory, startIllustrate, startIllustratePage, startTranslate, startAnimate, getWorkerStatus } from "../../api/client";
+import { updateStory, getWorkerStatus } from "../../api/client";
 import { KeyframeCard } from "../KeyframeCard";
 import { PageEditorDrawer } from "../PageEditorDrawer";
 import { CastReviewPanel } from "../CastReviewPanel";
-import { usePipelineStore } from "../../stores/pipelineStore";
+import { useStoryActions } from "../../hooks/useStoryActions";
 import type { StoryDetail, CastMember } from "../../api/types";
 
 interface PagesTabProps {
@@ -15,14 +14,11 @@ interface PagesTabProps {
 }
 
 export function PagesTab({ slug, data, invalidate }: PagesTabProps) {
-  const navigate = useNavigate();
-  const setTaskId = usePipelineStore((s) => s.setTaskId);
   const [selectedPage, setSelectedPage] = useState<number | null>(null);
   const [showCastEditor, setShowCastEditor] = useState(false);
   const [savingCast, setSavingCast] = useState(false);
-  const [translating, setTranslating] = useState(false);
   const [translateLang, setTranslateLang] = useState("");
-  const [animating, setAnimating] = useState(false);
+  const { handleAnimate, handleIllustrate, handleRegenerate, handleTranslate, animating, translating } = useStoryActions(slug, invalidate);
 
   const { data: workerStatus } = useQuery({
     queryKey: ["worker-status"],
@@ -39,42 +35,6 @@ export function PagesTab({ slug, data, invalidate }: PagesTabProps) {
     },
     [slug, invalidate],
   );
-
-  const handleRegenerate = useCallback(
-    async (pageNumber: number) => {
-      const res = await startIllustratePage(slug, pageNumber);
-      setTaskId(res.task_id);
-    },
-    [slug, setTaskId],
-  );
-
-  const handleIllustrate = async () => {
-    const res = await startIllustrate(slug);
-    setTaskId(res.task_id);
-  };
-
-  const handleAnimate = async () => {
-    setAnimating(true);
-    try {
-      const res = await startAnimate(slug);
-      setTaskId(res.task_id);
-      navigate(`/stories/${slug}/pipeline`, { state: { taskId: res.task_id } });
-    } catch (err) {
-      console.error("Failed to start animation:", err);
-      setAnimating(false);
-    }
-  };
-
-  const handleTranslate = async () => {
-    if (!translateLang.trim()) return;
-    setTranslating(true);
-    try {
-      await startTranslate(slug, translateLang.trim());
-      invalidate();
-    } finally {
-      setTranslating(false);
-    }
-  };
 
   const handleCastSave = async (cast: CastMember[]) => {
     setSavingCast(true);
@@ -130,7 +90,7 @@ export function PagesTab({ slug, data, invalidate }: PagesTabProps) {
             className="px-3 py-2 text-xs bg-cream border border-bark-200 rounded-[var(--radius-btn)] w-28 focus:outline-none focus-visible:ring-2 focus-visible:ring-sage-400"
           />
           <button
-            onClick={handleTranslate}
+            onClick={() => handleTranslate(translateLang)}
             disabled={translating || !translateLang.trim()}
             className="px-4 py-2 text-xs font-semibold text-bark-600 bg-bark-50 hover:bg-bark-100 disabled:opacity-40 rounded-[var(--radius-btn)] transition-colors"
           >

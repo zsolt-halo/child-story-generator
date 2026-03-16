@@ -203,6 +203,7 @@ export function AddFamilyMemberModal({
             <div className="mt-2">
               <CharacterEditor
                 mode="create"
+                variant="family-member"
                 onSave={(data: CharacterCreateRequest) => {
                   if (!relationship.trim()) return;
                   createAndLinkMutation.mutate({

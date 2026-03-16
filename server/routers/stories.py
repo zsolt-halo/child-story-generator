@@ -6,25 +6,16 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
+from server.routers._shared import generate_thumbnail
 from server.schemas import StoryListItem, StoryUpdate
 from server.services.story_service import (
     list_stories, get_story, update_story, delete_story, get_story_dir, get_metadata,
     get_db_flags, STORIES_DIR,
 )
 from src import storage
+from src.utils.io import get_static_backdrops, slugify
 
 router = APIRouter(prefix="/api/stories", tags=["stories"])
-
-
-def _generate_thumbnail(source: Path, dest: Path, width: int):
-    """Resize an image to the given width (preserving aspect ratio) and save as JPEG."""
-    from PIL import Image
-    with Image.open(source) as img:
-        ratio = width / img.width
-        height = round(img.height * ratio)
-        resized = img.resize((width, height), Image.LANCZOS)
-        resized = resized.convert("RGB")
-        resized.save(dest, "JPEG", quality=82, optimize=True)
 
 
 @router.get("/", response_model=list[StoryListItem])
@@ -47,7 +38,6 @@ async def get_story_detail(slug: str):
         if img.exists() or image_paths:
             image_urls[kf.page_number] = f"/api/stories/{slug}/images/{kf.image_prefix}.png"
 
-    from src.utils.io import get_static_backdrops
     backdrop_urls = [
         f"/api/config/backdrops/{p.name}"
         for p in get_static_backdrops(slug)
@@ -65,7 +55,6 @@ async def get_story_detail(slug: str):
             cover_variation_urls.append(f"/api/stories/{slug}/images/cover_v{i}.png")
 
     # Check for per-cast-member reference sheets
-    from src.utils.io import slugify
     cast_ref_urls: dict[str, str] = {}
     for member in story.cast:
         name_slug = slugify(member.name)
@@ -73,16 +62,21 @@ async def get_story_detail(slug: str):
         if ref_path.exists():
             cast_ref_urls[member.name] = f"/api/stories/{slug}/images/ref_{name_slug}.png"
 
-    # Video URLs — check local first, fall back to DB flag (serve endpoint handles MinIO)
+    # Video URLs — check local disk, then fall back to MinIO probe when DB says videos exist
     videos_dir = story_dir / "videos"
     video_urls: dict[int, str] = {}
+    db_flags = await get_db_flags(slug)
     for kf in story.keyframes:
         vid = videos_dir / f"{kf.image_prefix}.mp4"
         if vid.exists():
             video_urls[kf.page_number] = f"/api/stories/{slug}/videos/{kf.image_prefix}.mp4"
+    # If DB says videos exist but none found locally, assume MinIO has them —
+    # the serve endpoint will download on demand via ensure_local()
+    if not video_urls and db_flags["has_video"]:
+        for kf in story.keyframes:
+            video_urls[kf.page_number] = f"/api/stories/{slug}/videos/{kf.image_prefix}.mp4"
 
     metadata = await get_metadata(slug)
-    db_flags = await get_db_flags(slug)
 
     return {
         "slug": slug,
@@ -157,7 +151,7 @@ async def serve_image(slug: str, filename: str, w: int | None = Query(None)):
         raw_path = file_path.with_name(f"{stem}_raw.png")
         source = raw_path if raw_path.exists() else file_path
         thumbs_dir.mkdir(exist_ok=True)
-        await asyncio.to_thread(_generate_thumbnail, source, thumb_path, width)
+        await asyncio.to_thread(generate_thumbnail, source, thumb_path, width)
 
     return FileResponse(thumb_path, media_type="image/jpeg")
 

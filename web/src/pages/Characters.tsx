@@ -585,7 +585,8 @@ function DetailPanel({
       setGenerating(false);
       setGenTaskId(null);
       setGenMessage(null);
-      setLocalRefUrl(event.url ?? null);
+      const url = event.url ?? null;
+      setLocalRefUrl(url ? `${url}?t=${Date.now()}` : null);
       onRefSheetGenerated();
     }
     if (event.type === "task_complete") {
@@ -640,7 +641,7 @@ function DetailPanel({
       {refSheetUrl ? (
         <div className="mb-6 rounded-[var(--radius-card)] border border-bark-100 overflow-hidden bg-white shadow-sm">
           <img
-            src={`${refSheetUrl}?w=800`}
+            src={refSheetUrl.includes("?") ? `${refSheetUrl}&w=800` : `${refSheetUrl}?w=800`}
             alt={`${character.name} reference sheet`}
             className="w-full object-cover"
           />
@@ -713,7 +714,13 @@ function DetailPanel({
             currentRefSheetUrl={refSheetUrl}
             onAccepted={() => {
               setShowRefine(false);
-              setLocalRefUrl(null);
+              // Keep a cache-busted URL so the hero image reloads the new file
+              // instead of showing the browser-cached old one
+              const base = character.reference_sheet_url ?? refSheetUrl;
+              if (base) {
+                const clean = base.split("?")[0];
+                setLocalRefUrl(`${clean}?t=${Date.now()}`);
+              }
               onRefSheetGenerated();
             }}
             onClose={() => setShowRefine(false)}

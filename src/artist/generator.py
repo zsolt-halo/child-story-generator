@@ -95,9 +95,20 @@ def create_image_client(config: BookConfig) -> genai.Client:
 
 def _extract_image_bytes(response) -> bytes | None:
     """Extract image bytes from a Gemini generate_content response."""
-    if not response.candidates or not response.candidates[0].content.parts:
+    if not response.candidates:
+        logger.warning("Gemini response has no candidates")
         return None
-    for part in response.candidates[0].content.parts:
+    candidate = response.candidates[0]
+    if not candidate.content or not candidate.content.parts:
+        # Log block reason for debugging (safety filter, recitation, etc.)
+        reason = getattr(candidate, "finish_reason", None)
+        ratings = getattr(candidate, "safety_ratings", None)
+        logger.warning(
+            "Gemini candidate has no content — finish_reason=%s safety_ratings=%s",
+            reason, ratings,
+        )
+        return None
+    for part in candidate.content.parts:
         if hasattr(part, "inline_data") and part.inline_data:
             data = part.inline_data.data
             if isinstance(data, bytes):
@@ -184,7 +195,13 @@ def _generate_image(
     )
     image_bytes = _extract_image_bytes(response)
     if not image_bytes:
-        raise RuntimeError("No image data in response")
+        # Surface as much detail as possible for debugging
+        feedback = getattr(response, "prompt_feedback", None)
+        block_reason = getattr(feedback, "block_reason", None) if feedback else None
+        raise RuntimeError(
+            f"No image data in response (block_reason={block_reason}, "
+            f"candidates={len(response.candidates) if response.candidates else 0})"
+        )
     return image_bytes
 
 

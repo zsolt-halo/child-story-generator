@@ -5,7 +5,7 @@ import { usePipelineStore } from "../stores/pipelineStore";
 import { PipelineTimeline } from "../components/PipelineTimeline";
 import { UnifiedReviewPanel } from "../components/UnifiedReviewPanel";
 import { AnimationProgress } from "../components/AnimationProgress";
-import { updateStory, approvePipeline, getPhaseAverages, getStory } from "../api/client";
+import { updateStory, approvePipeline, continuePipeline, getPhaseAverages, getStory } from "../api/client";
 import { FadeImage } from "../components/FadeImage";
 import type { CastMember } from "../api/types";
 
@@ -74,15 +74,30 @@ export function Pipeline() {
           mainRefSheetUrl: detail.reference_sheet_url ?? null,
         });
       } else if (hasCast && !hasImages && !hasCoverVariations) {
-        // Legacy: cast done but no covers yet — still show unified review
-        restoreState({
-          slug: routeSlug,
-          title: story.title,
-          waitingForReview: true,
-          castMembers: story.cast,
-          castRefUrls: detail.cast_ref_urls ?? {},
-          mainRefSheetUrl: detail.reference_sheet_url ?? null,
-        });
+        const isAuto = detail.metadata?.notes?.startsWith("[auto]");
+        if (isAuto) {
+          // Auto story: skip cover selection — generate covers + illustrate in one go
+          approvePipeline(routeSlug, 1).then((res) => {
+            setTaskId(res.task_id);
+          }).catch(() => {
+            // Fallback: generate covers for manual selection
+            continuePipeline(routeSlug).then((res) => setTaskId(res.task_id)).catch(() => {});
+          });
+        } else {
+          // Manual story: generate covers for user selection
+          continuePipeline(routeSlug).then((res) => {
+            setTaskId(res.task_id);
+          }).catch(() => {
+            restoreState({
+              slug: routeSlug,
+              title: story.title,
+              waitingForReview: true,
+              castMembers: story.cast,
+              castRefUrls: detail.cast_ref_urls ?? {},
+              mainRefSheetUrl: detail.reference_sheet_url ?? null,
+            });
+          });
+        }
       } else if (hasKeyframes && !hasCast) {
         // Legacy: very old state, pre-cast — shouldn't happen with new flow
         restoreState({

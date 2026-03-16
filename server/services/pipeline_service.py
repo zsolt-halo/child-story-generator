@@ -14,10 +14,22 @@ from opentelemetry import trace
 
 from src.models import BookConfig, Character, Story
 from src.utils.config import build_config, load_style, async_resolve_character
-from src.utils.io import slugify
+from src.utils.io import slugify, get_static_backdrops
 
 from server.services.task_manager import task_manager
 from src import storage
+
+from src.brain.storyteller import generate_story, generate_premise
+from src.brain.keyframer import generate_keyframes
+from src.brain.cast_extractor import extract_cast, rewrite_cast_visuals
+from src.brain.translator import translate_story
+from src.artist.generator import (
+    generate_reference_sheet, load_reference_sheet,
+    generate_cast_reference_sheet, load_cast_reference_sheets,
+    generate_cover_variations,
+    build_image_prompt, create_image_client, generate_single_image, upscale_for_print,
+)
+from src.publisher.layout import render_book_pdf
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("starlight.pipeline")
@@ -249,6 +261,146 @@ async def _phase(task_id: str, phase: str, message: str, **extra_data):
     _record_phase_metric(phase, elapsed)
 
 
+# ---------------------------------------------------------------------------
+# Phase execution helpers (shared across pipeline entry points)
+# ---------------------------------------------------------------------------
+
+
+async def _generate_main_ref_sheet(
+    task_id: str, slug: str, char: Character, style_anchor: str,
+    config: BookConfig, images_dir: Path, photo_bytes: bytes | None,
+) -> str | None:
+    """Generate main character reference sheet. Returns the ref sheet URL or None."""
+    async with _phase(task_id, "reference_sheet", "Generating character reference sheet...") as r:
+        ref_path = await asyncio.to_thread(
+            generate_reference_sheet, char, style_anchor, config, images_dir, photo_bytes,
+        )
+        ref_url = f"/api/stories/{slug}/images/reference_sheet.png" if ref_path else None
+        r.update(generated=ref_path is not None, url=ref_url)
+    return ref_url
+
+
+async def _generate_cast_ref_sheets(
+    task_id: str, slug: str, story: Story, style_anchor: str,
+    config: BookConfig, images_dir: Path, *, delete_existing: bool = False,
+) -> list[dict]:
+    """Generate reference sheets for all cast members.
+
+    Returns a list of ``{"name": ..., "url": ...}`` dicts.
+    When *delete_existing* is True, existing ref images are removed first (regen flow).
+    """
+    if not story.cast:
+        return []
+    cast_count = len(story.cast)
+    verb = "Regenerating" if delete_existing else "Generating"
+    cast_ref_urls: list[dict] = []
+    async with _phase(task_id, "cast_reference_sheets", f"{verb} {cast_count} cast reference sheets...", total=cast_count) as r:
+        for i, member in enumerate(story.cast):
+            name_slug = slugify(member.name)
+            if delete_existing:
+                for suffix in [f"ref_{name_slug}.png", f"ref_{name_slug}_raw.png"]:
+                    p = images_dir / suffix
+                    if p.exists():
+                        p.unlink()
+            member_ref_path = await asyncio.to_thread(
+                generate_cast_reference_sheet, member, style_anchor, config, images_dir,
+            )
+            url = f"/api/stories/{slug}/images/ref_{name_slug}.png" if member_ref_path else None
+            cast_ref_urls.append({"name": member.name, "url": url})
+            await task_manager.broadcast(task_id, {
+                "type": "cast_ref_complete",
+                "name": member.name,
+                "url": url,
+                "progress": i + 1,
+                "total": cast_count,
+            })
+            if i < cast_count - 1:
+                await asyncio.sleep(5.0)
+        r.update(count=cast_count)
+    return cast_ref_urls
+
+
+async def _generate_cover_variations_phase(
+    task_id: str, slug: str, story: Story, char: Character,
+    style_anchor: str, config: BookConfig, images_dir: Path,
+    ref_bytes: bytes | None,
+) -> list[dict]:
+    """Generate cover variations. Returns list of ``{"index": ..., "url": ...}`` dicts."""
+    cover_kf = next((kf for kf in story.keyframes if kf.is_cover), None)
+    if not cover_kf:
+        return []
+    cover_title = story.title_translated or story.title
+    cover_variations: list[dict] = []
+    async with _phase(task_id, "cover_variations", "Generating cover options...", total=4) as r:
+        variation_paths = await asyncio.to_thread(
+            generate_cover_variations,
+            cover_kf, char, style_anchor, config, images_dir,
+            title=cover_title, cast=story.cast or None, count=4,
+            reference_image=ref_bytes,
+        )
+        for i, vp in enumerate(variation_paths):
+            url = f"/api/stories/{slug}/images/{vp.name}"
+            cover_variations.append({"index": i + 1, "url": url})
+            await task_manager.broadcast(task_id, {
+                "type": "cover_variation_complete",
+                "index": i + 1,
+                "url": url,
+            })
+        r.update(count=len(variation_paths))
+    return cover_variations
+
+
+async def _run_translation_phase(
+    task_id: str, slug: str, story: Story, language: str, config: BookConfig,
+    image_paths: list[str | Path] | None = None,
+) -> Story:
+    """Translate the story. Returns the updated Story with translated fields."""
+    async with _phase(task_id, "translation", f"Translating to {language}...") as r:
+        story = await asyncio.to_thread(translate_story, story, language, config)
+        await _save(slug, story, image_paths)
+        r.update(translated_title=story.title_translated)
+    return story
+
+
+async def _run_cast_rewrite_and_regen(
+    task_id: str, slug: str, ctx: PipelineContext, images_dir: Path,
+) -> None:
+    """Re-run cast visual rewrite + regenerate all cast reference sheets."""
+    if not ctx.story.cast:
+        return
+    async with _phase(task_id, "cast_rewrite", "Applying cast edits to illustrations...") as r:
+        ctx.story = await asyncio.to_thread(rewrite_cast_visuals, ctx.story, ctx.char, ctx.config)
+        await _save(slug, ctx.story, [str(p) for p in ctx.image_paths])
+        r.update(cast_count=len(ctx.story.cast))
+    await _generate_cast_ref_sheets(
+        task_id, slug, ctx.story, ctx.style_anchor, ctx.config, images_dir,
+        delete_existing=True,
+    )
+
+
+async def _run_illustrations_and_pdf(
+    task_id: str, slug: str, story: Story, config: BookConfig,
+    char: Character, style_anchor: str, story_dir: Path,
+) -> list[Path]:
+    """Generate page illustrations and render the PDF. Returns image paths."""
+    images_dir = story_dir / "images"
+    ref_bytes = load_reference_sheet(images_dir)
+    cast_ref_map = load_cast_reference_sheets(images_dir, story.cast) if story.cast else None
+
+    async with _phase(task_id, "illustration", "Generating illustrations...", total=len(story.keyframes)):
+        image_paths = await _illustrate_keyframes(
+            task_id, slug, story, config, char, style_anchor, images_dir, ref_bytes, cast_ref_map,
+        )
+    await _save(slug, story, [str(p) for p in image_paths])
+
+    backdrop_paths = get_static_backdrops(slug)
+    async with _phase(task_id, "pdf", "Rendering PDF..."):
+        pdf_path = story_dir / "book.pdf"
+        await asyncio.to_thread(render_book_pdf, story, image_paths, pdf_path, backdrop_paths or None)
+
+    return image_paths
+
+
 async def _illustrate_keyframes(
     task_id: str,
     slug: str,
@@ -261,10 +413,6 @@ async def _illustrate_keyframes(
     cast_ref_map: dict[str, bytes] | None = None,
 ) -> list[Path]:
     """Generate illustrations for all keyframes with SSE progress. Returns image paths."""
-    from src.artist.generator import (
-        build_image_prompt, create_image_client, generate_single_image, upscale_for_print,
-    )
-
     cover_title = story.title_translated or story.title
     client = create_image_client(config)
     image_paths: list[Path] = []
@@ -296,12 +444,21 @@ async def _illustrate_keyframes(
         prompt = build_image_prompt(kf, char, style_anchor, title=cover_title, cast=story.cast or None)
         raw_path = images_dir / f"{kf.image_prefix}_raw.png"
 
-        await asyncio.to_thread(
-            generate_single_image, client, prompt, config.image_model, raw_path,
-            reference_image=ref_bytes,
-            additional_references=additional_refs if additional_refs else None,
-        )
-        await asyncio.to_thread(upscale_for_print, raw_path, final_path)
+        try:
+            await asyncio.to_thread(
+                generate_single_image, client, prompt, config.image_model, raw_path,
+                reference_image=ref_bytes,
+                additional_references=additional_refs if additional_refs else None,
+            )
+            await asyncio.to_thread(upscale_for_print, raw_path, final_path)
+        except Exception:
+            logger.error("Failed to generate image for %s after all retries — skipping", kf.image_prefix, exc_info=True)
+            await task_manager.broadcast(task_id, {
+                "type": "image_failed", "page": kf.page_number,
+                "is_cover": kf.is_cover,
+                "progress": i + 1, "total": len(story.keyframes),
+            })
+            continue
 
         image_paths.append(final_path)
         await task_manager.broadcast(task_id, {
@@ -310,6 +467,14 @@ async def _illustrate_keyframes(
             "url": f"/api/stories/{slug}/images/{final_path.name}",
             "progress": i + 1, "total": len(story.keyframes),
         })
+
+        # Incremental sync: upload each image to MinIO so pages survive container restarts
+        try:
+            await storage.upload_file(f"{slug}/images/{final_path.name}", final_path)
+            if raw_path.exists():
+                await storage.upload_file(f"{slug}/images/{raw_path.name}", raw_path)
+        except Exception:
+            logger.debug("Incremental sync failed for %s — will sync at end", final_path.name)
 
         if i < len(story.keyframes) - 1:
             await asyncio.sleep(5.0)
@@ -342,13 +507,11 @@ async def run_full_pipeline(
     family_members = await _resolve_family_members(family_member_ids)
 
     # Phase 1: Story
-    from src.brain.storyteller import generate_story
     async with _phase(task_id, "story", "Generating story...") as r:
         title, prose = await asyncio.to_thread(generate_story, notes, char, config, style_desc, family_members=family_members or None)
         r.update(title=title, word_count=len(prose.split()))
 
     # Phase 2: Keyframes
-    from src.brain.keyframer import generate_keyframes
     async with _phase(task_id, "keyframes", "Breaking story into pages...") as r:
         story = await asyncio.to_thread(generate_keyframes, title, prose, char, config, style_desc)
         r.update(page_count=len(story.keyframes))
@@ -370,12 +533,10 @@ async def run_full_pipeline(
     slug = output_dir.name
     await _save(slug, story, metadata=metadata)
 
-    # Store family selection on story row
     if family_member_ids:
         await _save_family_selection(slug, family_member_ids, allow_extra_cast)
 
     # Phase 2.5: Cast Extraction
-    from src.brain.cast_extractor import extract_cast
     story.cast = []
     async with _phase(task_id, "cast", "Analyzing character cast for consistency...") as r:
         story = await asyncio.to_thread(
@@ -388,61 +549,19 @@ async def run_full_pipeline(
 
     # Phase 2b: Translation
     if language:
-        from src.brain.translator import translate_story
-        async with _phase(task_id, "translation", f"Translating to {language}...") as r:
-            story = await asyncio.to_thread(translate_story, story, language, config)
-            await _save(slug, story)
-            r.update(translated_title=story.title_translated)
+        story = await _run_translation_phase(task_id, slug, story, language, config)
 
     # Phase 2c: Reference Sheet
-    from src.artist.generator import (
-        generate_reference_sheet, load_reference_sheet,
-        generate_cast_reference_sheet, load_cast_reference_sheets,
-    )
     images_dir = output_dir / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
     photo_bytes = await _load_character_photo(character)
-    async with _phase(task_id, "reference_sheet", "Generating character reference sheet...") as r:
-        ref_path = await asyncio.to_thread(generate_reference_sheet, char, style_anchor, config, images_dir, photo_bytes)
-        r.update(generated=ref_path is not None, url=f"/api/stories/{slug}/images/reference_sheet.png" if ref_path else None)
+    await _generate_main_ref_sheet(task_id, slug, char, style_anchor, config, images_dir, photo_bytes)
 
     # Phase 2d: Cast reference sheets
-    if story.cast:
-        cast_count = len(story.cast)
-        async with _phase(task_id, "cast_reference_sheets", f"Generating {cast_count} cast reference sheets...", total=cast_count) as r:
-            for i, member in enumerate(story.cast):
-                await asyncio.to_thread(
-                    generate_cast_reference_sheet, member, style_anchor, config, images_dir,
-                )
-                name_slug = slugify(member.name)
-                await task_manager.broadcast(task_id, {
-                    "type": "cast_ref_complete",
-                    "name": member.name,
-                    "url": f"/api/stories/{slug}/images/ref_{name_slug}.png",
-                    "progress": i + 1,
-                    "total": cast_count,
-                })
-                if i < cast_count - 1:
-                    await asyncio.sleep(5.0)
-            r.update(count=cast_count)
+    await _generate_cast_ref_sheets(task_id, slug, story, style_anchor, config, images_dir)
 
-    ref_bytes = load_reference_sheet(images_dir)
-    cast_ref_map = load_cast_reference_sheets(images_dir, story.cast) if story.cast else None
-
-    # Phase 3: Illustrations
-    async with _phase(task_id, "illustration", "Generating illustrations...", total=len(story.keyframes)):
-        image_paths = await _illustrate_keyframes(
-            task_id, slug, story, config, char, style_anchor, images_dir, ref_bytes, cast_ref_map,
-        )
-    await _save(slug, story, [str(p) for p in image_paths])
-
-    # Phase 4: PDF
-    from src.utils.io import get_static_backdrops
-    from src.publisher.layout import render_book_pdf
-    backdrop_paths = get_static_backdrops(slug)
-    async with _phase(task_id, "pdf", "Rendering PDF..."):
-        pdf_path = output_dir / "book.pdf"
-        await asyncio.to_thread(render_book_pdf, story, image_paths, pdf_path, backdrop_paths or None)
+    # Phase 3-4: Illustrations + PDF
+    await _run_illustrations_and_pdf(task_id, slug, story, config, char, style_anchor, output_dir)
 
     # Sync all assets to object storage
     await storage.sync_directory(output_dir, slug)
@@ -475,19 +594,16 @@ async def run_auto_pipeline(
     family_members = await _resolve_family_members(family_member_ids)
 
     # Phase 0: Premise — generate synthetic parent notes
-    from src.brain.storyteller import generate_premise
     async with _phase(task_id, "premise", "Imagining a story idea...") as r:
         notes = await asyncio.to_thread(generate_premise, char, config, family_members=family_members or None)
         r.update(notes=notes)
 
     # Phase 1: Story
-    from src.brain.storyteller import generate_story
     async with _phase(task_id, "story", "Generating story...") as r:
         title, prose = await asyncio.to_thread(generate_story, notes, char, config, style_desc, family_members=family_members or None)
         r.update(title=title, word_count=len(prose.split()))
 
     # Phase 2: Keyframes
-    from src.brain.keyframer import generate_keyframes
     async with _phase(task_id, "keyframes", "Breaking story into pages...") as r:
         story = await asyncio.to_thread(generate_keyframes, title, prose, char, config, style_desc)
         r.update(page_count=len(story.keyframes))
@@ -509,12 +625,10 @@ async def run_auto_pipeline(
     slug = output_dir.name
     await _save(slug, story, metadata=metadata)
 
-    # Store family selection on story row
     if family_member_ids:
         await _save_family_selection(slug, family_member_ids, allow_extra_cast)
 
     # Phase 2.5: Cast Extraction
-    from src.brain.cast_extractor import extract_cast
     story.cast = []
     async with _phase(task_id, "cast", "Analyzing character cast for consistency...") as r:
         story = await asyncio.to_thread(
@@ -527,61 +641,36 @@ async def run_auto_pipeline(
 
     # Phase 2b: Translation
     if language:
-        from src.brain.translator import translate_story
-        async with _phase(task_id, "translation", f"Translating to {language}...") as r:
-            story = await asyncio.to_thread(translate_story, story, language, config)
-            await _save(slug, story)
-            r.update(translated_title=story.title_translated)
+        story = await _run_translation_phase(task_id, slug, story, language, config)
 
     # Phase 2c: Reference Sheet
-    from src.artist.generator import (
-        generate_reference_sheet, load_reference_sheet,
-        generate_cast_reference_sheet, load_cast_reference_sheets,
-    )
     images_dir = output_dir / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
     photo_bytes = await _load_character_photo(character)
-    async with _phase(task_id, "reference_sheet", "Generating character reference sheet...") as r:
-        ref_path = await asyncio.to_thread(generate_reference_sheet, char, style_anchor, config, images_dir, photo_bytes)
-        r.update(generated=ref_path is not None, url=f"/api/stories/{slug}/images/reference_sheet.png" if ref_path else None)
+    await _generate_main_ref_sheet(task_id, slug, char, style_anchor, config, images_dir, photo_bytes)
 
     # Phase 2d: Cast reference sheets
-    if story.cast:
-        cast_count = len(story.cast)
-        async with _phase(task_id, "cast_reference_sheets", f"Generating {cast_count} cast reference sheets...", total=cast_count) as r:
-            for i, member in enumerate(story.cast):
-                await asyncio.to_thread(
-                    generate_cast_reference_sheet, member, style_anchor, config, images_dir,
-                )
-                name_slug = slugify(member.name)
-                await task_manager.broadcast(task_id, {
-                    "type": "cast_ref_complete",
-                    "name": member.name,
-                    "url": f"/api/stories/{slug}/images/ref_{name_slug}.png",
-                    "progress": i + 1,
-                    "total": cast_count,
-                })
-                if i < cast_count - 1:
-                    await asyncio.sleep(5.0)
-            r.update(count=cast_count)
+    await _generate_cast_ref_sheets(task_id, slug, story, style_anchor, config, images_dir)
 
-    ref_bytes = load_reference_sheet(images_dir)
-    cast_ref_map = load_cast_reference_sheets(images_dir, story.cast) if story.cast else None
-
-    # Phase 3: Illustrations
-    async with _phase(task_id, "illustration", "Generating illustrations...", total=len(story.keyframes)):
-        image_paths = await _illustrate_keyframes(
-            task_id, slug, story, config, char, style_anchor, images_dir, ref_bytes, cast_ref_map,
+    # Phase 2e: Cover Variations — generate + auto-select #1
+    import shutil
+    try:
+        ref_bytes = load_reference_sheet(images_dir)
+        await _generate_cover_variations_phase(
+            task_id, slug, story, char, style_anchor, config, images_dir, ref_bytes,
         )
-    await _save(slug, story, [str(p) for p in image_paths])
+        # Auto-select cover #1
+        chosen = images_dir / "cover_v1.png"
+        chosen_raw = images_dir / "cover_v1_raw.png"
+        if chosen.exists():
+            shutil.copy2(chosen, images_dir / "cover.png")
+        if chosen_raw.exists():
+            shutil.copy2(chosen_raw, images_dir / "cover_raw.png")
+    except Exception:
+        logger.warning("Cover variation generation failed — cover will be generated during illustration phase", exc_info=True)
 
-    # Phase 4: PDF
-    from src.utils.io import get_static_backdrops
-    from src.publisher.layout import render_book_pdf
-    backdrop_paths = get_static_backdrops(slug)
-    async with _phase(task_id, "pdf", "Rendering PDF..."):
-        pdf_path = output_dir / "book.pdf"
-        await asyncio.to_thread(render_book_pdf, story, image_paths, pdf_path, backdrop_paths or None)
+    # Phase 3-4: Illustrations + PDF
+    await _run_illustrations_and_pdf(task_id, slug, story, config, char, style_anchor, output_dir)
 
     # Sync all assets to object storage
     await storage.sync_directory(output_dir, slug)
@@ -619,12 +708,10 @@ async def run_story_only(
     style_anchor = style_data.get("anchor", style_desc)
     family_members = await _resolve_family_members(family_member_ids)
 
-    from src.brain.storyteller import generate_story
     async with _phase(task_id, "story", "Generating story...") as r:
         title, prose = await asyncio.to_thread(generate_story, notes, char, config, style_desc, family_members=family_members or None)
         r.update(title=title, word_count=len(prose.split()))
 
-    from src.brain.keyframer import generate_keyframes
     async with _phase(task_id, "keyframes", "Breaking story into pages...") as r:
         story = await asyncio.to_thread(generate_keyframes, title, prose, char, config, style_desc)
         r.update(page_count=len(story.keyframes))
@@ -646,12 +733,10 @@ async def run_story_only(
     }
     await _save(slug, story, metadata=metadata)
 
-    # Store family selection on story row
     if family_member_ids:
         await _save_family_selection(slug, family_member_ids, allow_extra_cast)
 
     # Phase 2.5: Cast Extraction
-    from src.brain.cast_extractor import extract_cast
     story.cast = []
     async with _phase(task_id, "cast", "Analyzing character cast for consistency...") as r:
         story = await asyncio.to_thread(
@@ -663,76 +748,23 @@ async def run_story_only(
         r.update(cast_count=len(story.cast), members=[m.model_dump() for m in story.cast])
 
     # Phase 2c: Main character reference sheet
-    from src.artist.generator import (
-        generate_reference_sheet, generate_cast_reference_sheet,
-        generate_cover_variations, load_reference_sheet,
-    )
     images_dir = output_dir / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
     photo_bytes = await _load_character_photo(character)
+    ref_url = await _generate_main_ref_sheet(task_id, slug, char, style_anchor, config, images_dir, photo_bytes)
 
-    ref_url = None
-    async with _phase(task_id, "reference_sheet", "Generating main character reference sheet...") as r:
-        ref_path = await asyncio.to_thread(
-            generate_reference_sheet, char, style_anchor, config, images_dir, photo_bytes,
-        )
-        ref_url = f"/api/stories/{slug}/images/reference_sheet.png" if ref_path else None
-        r.update(generated=ref_path is not None, url=ref_url)
-
-    # Phase 2d: Per-cast-member reference sheets
-    cast_ref_urls: list[dict] = []
-    if story.cast:
-        cast_count = len(story.cast)
-        async with _phase(task_id, "cast_reference_sheets", f"Generating {cast_count} cast reference sheets...", total=cast_count) as r:
-            for i, member in enumerate(story.cast):
-                member_ref_path = await asyncio.to_thread(
-                    generate_cast_reference_sheet, member, style_anchor, config, images_dir,
-                )
-                name_slug = slugify(member.name)
-                url = f"/api/stories/{slug}/images/ref_{name_slug}.png" if member_ref_path else None
-                cast_ref_urls.append({"name": member.name, "url": url})
-                await task_manager.broadcast(task_id, {
-                    "type": "cast_ref_complete",
-                    "name": member.name,
-                    "url": url,
-                    "progress": i + 1,
-                    "total": cast_count,
-                })
-                if i < cast_count - 1:
-                    await asyncio.sleep(5.0)
-            r.update(count=len(cast_ref_urls))
+    # Phase 2d: Cast reference sheets
+    cast_ref_urls = await _generate_cast_ref_sheets(task_id, slug, story, style_anchor, config, images_dir)
 
     # Phase 2b: Translation (if language configured)
     if language:
-        from src.brain.translator import translate_story
-        async with _phase(task_id, "translation", f"Translating to {language}...") as r:
-            story = await asyncio.to_thread(translate_story, story, language, config)
-            await _save(slug, story)
-            r.update(translated_title=story.title_translated)
+        story = await _run_translation_phase(task_id, slug, story, language, config)
 
     # Phase 2e: Cover Variations
-    cover_variations: list[dict] = []
-    cover_kf = next((kf for kf in story.keyframes if kf.is_cover), None)
-    if cover_kf:
-        cover_title = story.title_translated or story.title
-        ref_bytes = load_reference_sheet(images_dir)
-
-        async with _phase(task_id, "cover_variations", "Generating cover options...", total=4) as r:
-            variation_paths = await asyncio.to_thread(
-                generate_cover_variations,
-                cover_kf, char, style_anchor, config, images_dir,
-                title=cover_title, cast=story.cast or None, count=4,
-                reference_image=ref_bytes,
-            )
-            for i, vp in enumerate(variation_paths):
-                url = f"/api/stories/{slug}/images/{vp.name}"
-                cover_variations.append({"index": i + 1, "url": url})
-                await task_manager.broadcast(task_id, {
-                    "type": "cover_variation_complete",
-                    "index": i + 1,
-                    "url": url,
-                })
-            r.update(count=len(variation_paths))
+    ref_bytes = load_reference_sheet(images_dir)
+    cover_variations = await _generate_cover_variations_phase(
+        task_id, slug, story, char, style_anchor, config, images_dir, ref_bytes,
+    )
 
     # Sync ref sheets + cover variations to object storage
     await storage.sync_directory(output_dir, slug)
@@ -751,7 +783,6 @@ async def run_story_only(
 async def run_cast_extraction(task_id: str, slug: str) -> dict:
     """Run cast extraction on an existing story, then generate reference sheets."""
     ctx = await _load_pipeline_context(slug)
-    from src.brain.cast_extractor import extract_cast
 
     ctx.story.cast = []
     async with _phase(task_id, "cast", "Analyzing character cast for consistency...") as r:
@@ -764,43 +795,13 @@ async def run_cast_extraction(task_id: str, slug: str) -> dict:
         r.update(cast_count=len(ctx.story.cast), members=[m.model_dump() for m in ctx.story.cast])
 
     # Phase 2c: Main character reference sheet
-    from src.artist.generator import (
-        generate_reference_sheet, generate_cast_reference_sheet,
-    )
     images_dir = ctx.story_dir / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
     photo_bytes = await _load_character_photo(ctx.config.character)
+    ref_url = await _generate_main_ref_sheet(task_id, slug, ctx.char, ctx.style_anchor, ctx.config, images_dir, photo_bytes)
 
-    ref_url = None
-    async with _phase(task_id, "reference_sheet", "Generating main character reference sheet...") as r:
-        ref_path = await asyncio.to_thread(
-            generate_reference_sheet, ctx.char, ctx.style_anchor, ctx.config, images_dir, photo_bytes,
-        )
-        ref_url = f"/api/stories/{slug}/images/reference_sheet.png" if ref_path else None
-        r.update(generated=ref_path is not None, url=ref_url)
-
-    # Phase 2d: Per-cast-member reference sheets
-    cast_ref_urls: list[dict] = []
-    if ctx.story.cast:
-        cast_count = len(ctx.story.cast)
-        async with _phase(task_id, "cast_reference_sheets", f"Generating {cast_count} cast reference sheets...", total=cast_count) as r:
-            for i, member in enumerate(ctx.story.cast):
-                member_ref_path = await asyncio.to_thread(
-                    generate_cast_reference_sheet, member, ctx.style_anchor, ctx.config, images_dir,
-                )
-                name_slug = slugify(member.name)
-                url = f"/api/stories/{slug}/images/ref_{name_slug}.png" if member_ref_path else None
-                cast_ref_urls.append({"name": member.name, "url": url})
-                await task_manager.broadcast(task_id, {
-                    "type": "cast_ref_complete",
-                    "name": member.name,
-                    "url": url,
-                    "progress": i + 1,
-                    "total": cast_count,
-                })
-                if i < cast_count - 1:
-                    await asyncio.sleep(5.0)
-            r.update(count=len(cast_ref_urls))
+    # Phase 2d: Cast reference sheets
+    cast_ref_urls = await _generate_cast_ref_sheets(task_id, slug, ctx.story, ctx.style_anchor, ctx.config, images_dir)
 
     # Sync ref sheets to object storage
     await storage.sync_directory(images_dir, f"{slug}/images")
@@ -816,7 +817,6 @@ async def run_cast_extraction(task_id: str, slug: str) -> dict:
 async def run_translate(task_id: str, slug: str, language: str) -> dict:
     """Run translation on an existing story."""
     ctx = await _load_pipeline_context(slug)
-    from src.brain.translator import translate_story
 
     async with _phase(task_id, "translation", f"Translating to {language}...") as r:
         ctx.story = await asyncio.to_thread(translate_story, ctx.story, language, ctx.config)
@@ -829,10 +829,6 @@ async def run_translate(task_id: str, slug: str, language: str) -> dict:
 async def run_illustrate(task_id: str, slug: str, page_number: int | None = None) -> dict:
     """Run illustration on an existing story. If page_number given, regenerate only that page."""
     ctx = await _load_pipeline_context(slug)
-    from src.artist.generator import (
-        build_image_prompt, create_image_client, generate_single_image, upscale_for_print,
-        load_reference_sheet, load_cast_reference_sheets,
-    )
 
     images_dir = ctx.story_dir / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
@@ -904,7 +900,6 @@ async def run_regenerate_cast_ref_sheet(task_id: str, slug: str, member_name: st
     if not member:
         raise ValueError(f"Cast member '{member_name}' not found")
 
-    from src.artist.generator import generate_cast_reference_sheet
     images_dir = ctx.story_dir / "images"
     name_slug = slugify(member_name)
 
@@ -950,94 +945,31 @@ async def run_continue_pipeline(task_id: str, slug: str, cast_edited: bool = Fal
     images_dir = ctx.story_dir / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
 
-    # Phase 2.5b: Re-run cast rewrite only if the user actually edited the cast
-    # during review. This avoids an unnecessary Gemini API call when approving unchanged.
-    if cast_edited and ctx.story.cast:
-        from src.brain.cast_extractor import rewrite_cast_visuals
-        async with _phase(task_id, "cast_rewrite", "Applying cast edits to illustrations...") as r:
-            ctx.story = await asyncio.to_thread(rewrite_cast_visuals, ctx.story, ctx.char, ctx.config)
-            await _save(slug, ctx.story, [str(p) for p in ctx.image_paths])
-            r.update(cast_count=len(ctx.story.cast))
-
-    # Phase 2b-regen: Regenerate all cast reference sheets when cast was edited
-    if cast_edited and ctx.story.cast:
-        from src.artist.generator import generate_cast_reference_sheet
-        cast_count = len(ctx.story.cast)
-        async with _phase(task_id, "cast_reference_sheets", f"Regenerating {cast_count} cast reference sheets...", total=cast_count) as r:
-            regen_count = 0
-            for i, member in enumerate(ctx.story.cast):
-                name_slug = slugify(member.name)
-                # Delete existing to force regeneration
-                for suffix in [f"ref_{name_slug}.png", f"ref_{name_slug}_raw.png"]:
-                    p = images_dir / suffix
-                    if p.exists():
-                        p.unlink()
-                member_ref_path = await asyncio.to_thread(
-                    generate_cast_reference_sheet, member, ctx.style_anchor, ctx.config, images_dir,
-                )
-                if member_ref_path:
-                    regen_count += 1
-                    url = f"/api/stories/{slug}/images/ref_{name_slug}.png"
-                    await task_manager.broadcast(task_id, {
-                        "type": "cast_ref_complete",
-                        "name": member.name,
-                        "url": url,
-                        "progress": i + 1,
-                        "total": cast_count,
-                    })
-                if i < cast_count - 1:
-                    await asyncio.sleep(5.0)
-            r.update(regenerated=regen_count)
+    # Re-run cast rewrite + regen if the user edited the cast during review
+    if cast_edited:
+        await _run_cast_rewrite_and_regen(task_id, slug, ctx, images_dir)
 
     # Phase 2b: Translation (if language configured and not already done)
     if ctx.language and not ctx.story.title_translated:
-        from src.brain.translator import translate_story
-        async with _phase(task_id, "translation", f"Translating to {ctx.language}...") as r:
-            ctx.story = await asyncio.to_thread(translate_story, ctx.story, ctx.language, ctx.config)
-            await _save(slug, ctx.story, [str(p) for p in ctx.image_paths])
-            r.update(translated_title=ctx.story.title_translated)
-
-    from src.artist.generator import (
-        generate_cover_variations, load_reference_sheet,
-    )
+        ctx.story = await _run_translation_phase(
+            task_id, slug, ctx.story, ctx.language, ctx.config,
+            [str(p) for p in ctx.image_paths],
+        )
 
     # Phase 2d: Cover Variations (ref sheet already generated during cast extraction)
-    cover_kf = next((kf for kf in ctx.story.keyframes if kf.is_cover), None)
-    if cover_kf:
-        cover_title = ctx.story.title_translated or ctx.story.title
-        ref_bytes = load_reference_sheet(images_dir)
+    ref_bytes = load_reference_sheet(images_dir)
+    cover_variations = await _generate_cover_variations_phase(
+        task_id, slug, ctx.story, ctx.char, ctx.style_anchor, ctx.config, images_dir, ref_bytes,
+    )
 
-        async with _phase(task_id, "cover_variations", "Generating cover options...", total=4) as r:
-            variation_paths = await asyncio.to_thread(
-                generate_cover_variations,
-                cover_kf, ctx.char, ctx.style_anchor, ctx.config, images_dir,
-                title=cover_title, cast=ctx.story.cast or None, count=4,
-                reference_image=ref_bytes,
-            )
-
-            # Broadcast each variation for the frontend
-            cover_variations = []
-            for i, vp in enumerate(variation_paths):
-                url = f"/api/stories/{slug}/images/{vp.name}"
-                cover_variations.append({"index": i + 1, "url": url})
-                await task_manager.broadcast(task_id, {
-                    "type": "cover_variation_complete",
-                    "index": i + 1,
-                    "url": url,
-                })
-            r.update(count=len(variation_paths))
-
-        # Sync cover variations to object storage
+    if cover_variations:
         await storage.sync_directory(images_dir, f"{slug}/images")
 
-        return {
-            "slug": slug,
-            "title": ctx.story.title,
-            "cover_variations": cover_variations,
-        }
-
-    # No cover keyframe — shouldn't happen but fall through
-    return {"slug": slug, "title": ctx.story.title}
+    return {
+        "slug": slug,
+        "title": ctx.story.title,
+        "cover_variations": cover_variations,
+    }
 
 
 async def run_approve_pipeline(task_id: str, slug: str, choice: int, cast_edited: bool = False) -> dict:
@@ -1054,43 +986,9 @@ async def run_approve_pipeline(task_id: str, slug: str, choice: int, cast_edited
     images_dir = ctx.story_dir / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
 
-    if cast_edited and ctx.story.cast:
-        from src.brain.cast_extractor import rewrite_cast_visuals
-        async with _phase(task_id, "cast_rewrite", "Applying cast edits to illustrations...") as r:
-            ctx.story = await asyncio.to_thread(rewrite_cast_visuals, ctx.story, ctx.char, ctx.config)
-            await _save(slug, ctx.story, [str(p) for p in ctx.image_paths])
-            r.update(cast_count=len(ctx.story.cast))
+    if cast_edited:
+        await _run_cast_rewrite_and_regen(task_id, slug, ctx, images_dir)
 
-        # Regenerate all cast reference sheets
-        from src.artist.generator import generate_cast_reference_sheet
-        cast_count = len(ctx.story.cast)
-        async with _phase(task_id, "cast_reference_sheets", f"Regenerating {cast_count} cast reference sheets...", total=cast_count) as r:
-            regen_count = 0
-            for i, member in enumerate(ctx.story.cast):
-                name_slug = slugify(member.name)
-                for suffix in [f"ref_{name_slug}.png", f"ref_{name_slug}_raw.png"]:
-                    p = images_dir / suffix
-                    if p.exists():
-                        p.unlink()
-                member_ref_path = await asyncio.to_thread(
-                    generate_cast_reference_sheet, member, ctx.style_anchor, ctx.config, images_dir,
-                )
-                if member_ref_path:
-                    regen_count += 1
-                    url = f"/api/stories/{slug}/images/ref_{name_slug}.png"
-                    await task_manager.broadcast(task_id, {
-                        "type": "cast_ref_complete",
-                        "name": member.name,
-                        "url": url,
-                        "progress": i + 1,
-                        "total": cast_count,
-                    })
-                if i < cast_count - 1:
-                    await asyncio.sleep(5.0)
-            r.update(regenerated=regen_count)
-
-    # Now continue with cover selection + illustrations + PDF
-    # (Delegate to existing function, re-using the task_id)
     return await run_after_cover_selection(task_id, slug, choice)
 
 
@@ -1105,9 +1003,27 @@ async def run_after_cover_selection(task_id: str, slug: str, choice: int) -> dic
     ctx = await _load_pipeline_context(slug)
 
     images_dir = ctx.story_dir / "images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+
+    # Generate cover variations if they don't exist (auto-resume after crash)
+    chosen_path = images_dir / f"cover_v{choice}.png"
+    if not chosen_path.exists():
+        cover_kf = next((kf for kf in ctx.story.keyframes if kf.is_cover), None)
+        if cover_kf:
+            # Ensure reference sheet exists
+            photo_bytes = await _load_character_photo(ctx.config.character)
+            await asyncio.to_thread(
+                generate_reference_sheet, ctx.char, ctx.style_anchor, ctx.config, images_dir, photo_bytes,
+            )
+            ref_for_cover = load_reference_sheet(images_dir)
+            try:
+                await _generate_cover_variations_phase(
+                    task_id, slug, ctx.story, ctx.char, ctx.style_anchor, ctx.config, images_dir, ref_for_cover,
+                )
+            except Exception:
+                logger.warning("Cover generation failed during resume — continuing without cover", exc_info=True)
 
     # Copy chosen cover variation to cover.png
-    chosen_path = images_dir / f"cover_v{choice}.png"
     chosen_raw = images_dir / f"cover_v{choice}_raw.png"
     cover_final = images_dir / "cover.png"
     cover_raw = images_dir / "cover_raw.png"
@@ -1117,24 +1033,8 @@ async def run_after_cover_selection(task_id: str, slug: str, choice: int) -> dic
     if chosen_raw.exists():
         shutil.copy2(chosen_raw, cover_raw)
 
-    from src.artist.generator import load_reference_sheet, load_cast_reference_sheets
-    ref_bytes = load_reference_sheet(images_dir)
-    cast_ref_map = load_cast_reference_sheets(images_dir, ctx.story.cast) if ctx.story.cast else None
-
-    # Phase 3: Page Illustrations (cover.png already exists, will be skipped)
-    async with _phase(task_id, "illustration", "Generating illustrations...", total=len(ctx.story.keyframes)):
-        new_image_paths = await _illustrate_keyframes(
-            task_id, slug, ctx.story, ctx.config, ctx.char, ctx.style_anchor, images_dir, ref_bytes, cast_ref_map,
-        )
-    await _save(slug, ctx.story, [str(p) for p in new_image_paths])
-
-    # Phase 4: PDF
-    from src.utils.io import get_static_backdrops
-    from src.publisher.layout import render_book_pdf
-    backdrop_paths = get_static_backdrops(slug)
-    async with _phase(task_id, "pdf", "Rendering PDF..."):
-        pdf_path = ctx.story_dir / "book.pdf"
-        await asyncio.to_thread(render_book_pdf, ctx.story, new_image_paths, pdf_path, backdrop_paths or None)
+    # Phase 3-4: Illustrations + PDF
+    await _run_illustrations_and_pdf(task_id, slug, ctx.story, ctx.config, ctx.char, ctx.style_anchor, ctx.story_dir)
 
     # Sync all assets to object storage
     await storage.sync_directory(ctx.story_dir, slug)
@@ -1357,10 +1257,8 @@ async def _update_video_db(slug: str, clip_paths: list[Path]) -> None:
 async def run_pdf(task_id: str, slug: str) -> dict:
     """Render PDFs for an existing story."""
     ctx = await _load_pipeline_context(slug)
-    from src.utils.io import get_static_backdrops
     backdrop_paths = get_static_backdrops(slug)
 
-    from src.publisher.layout import render_book_pdf
     async with _phase(task_id, "pdf", "Rendering PDF..."):
         pdf_path = ctx.story_dir / "book.pdf"
         await asyncio.to_thread(render_book_pdf, ctx.story, ctx.image_paths, pdf_path, backdrop_paths or None)

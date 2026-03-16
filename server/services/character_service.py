@@ -11,6 +11,14 @@ from src import storage
 logger = logging.getLogger(__name__)
 _repo = CharacterRepository()
 
+
+class CharacterNotFoundError(ValueError):
+    """Raised when a character cannot be found by ID or slug."""
+
+
+class CharacterConflictError(ValueError):
+    """Raised when a character operation conflicts (e.g. delete of in-use character)."""
+
 # Templates use slug for file paths (no UUID). Custom characters use UUID.
 CHARACTERS_ASSETS = "stories/.characters"
 
@@ -102,7 +110,10 @@ async def list_all_characters() -> list[dict]:
 
 async def get_character(id: str) -> dict:
     """Get a single character by UUID string."""
-    row = await _repo.async_get_by_id(uuid.UUID(id))
+    try:
+        row = await _repo.async_get_by_id(uuid.UUID(id))
+    except FileNotFoundError:
+        raise CharacterNotFoundError(f"Character not found: {id}")
     return _row_to_dict(row)
 
 
@@ -123,8 +134,10 @@ async def create_character(data: dict) -> dict:
 
 async def update_character(id: str, data: dict) -> dict:
     """Update a custom character."""
-    # Get current row to fill in any fields not provided
-    current = await _repo.async_get_by_id(uuid.UUID(id))
+    try:
+        current = await _repo.async_get_by_id(uuid.UUID(id))
+    except FileNotFoundError:
+        raise CharacterNotFoundError(f"Character not found: {id}")
 
     char = Character(
         name=data.get("name", current.name),
@@ -170,7 +183,7 @@ async def delete_character(id: str) -> None:
         )
         referencing = result.scalar_one_or_none()
         if referencing is not None:
-            raise ValueError(
+            raise CharacterConflictError(
                 f"Cannot delete: character is used by story '{referencing}'"
             )
 
@@ -188,8 +201,11 @@ async def delete_character(id: str) -> None:
 
 
 async def duplicate_character(id: str) -> dict:
-    """Duplicate a custom character as a new custom character."""
-    source = await get_character(id)
+    """Duplicate a custom character as a new custom character.
+
+    Raises CharacterNotFoundError if the source character doesn't exist.
+    """
+    source = await get_character(id)  # propagates CharacterNotFoundError
 
     new_slug = f"{source['slug']}-copy"
     try:
@@ -212,7 +228,10 @@ async def duplicate_character(id: str) -> dict:
 
 async def duplicate_template(slug: str) -> dict:
     """Duplicate a TOML template as a new custom character."""
-    char = load_character(slug)
+    try:
+        char = load_character(slug)
+    except FileNotFoundError:
+        raise CharacterNotFoundError(f"Template not found: {slug}")
     data = char.model_dump()
     data["slug"] = f"{slug}-custom"
     return await create_character(data)
@@ -309,6 +328,11 @@ async def generate_character_reference_sheet(
         old_path = output_dir / old_file
         if old_path.exists():
             old_path.unlink()
+    # Clear stale thumbnails so the serve endpoint regenerates them from the new image
+    import shutil
+    thumbs_dir = output_dir / ".thumbs"
+    if thumbs_dir.exists():
+        shutil.rmtree(thumbs_dir)
 
     config = BookConfig()
     await asyncio.to_thread(

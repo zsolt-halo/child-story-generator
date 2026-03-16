@@ -35,6 +35,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+async function requestFormData<T>(path: string, formData: FormData, method = "POST"): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, { method, body: formData });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`API error ${res.status}: ${body}`);
+  }
+  return res.json() as Promise<T>;
+}
+
 // Stories
 export const listStories = () => request<StoryListItem[]>("/stories/");
 export const getStory = (slug: string) => request<StoryDetail>(`/stories/${slug}`);
@@ -121,22 +130,25 @@ export const polishCharacter = (data: CharacterPolishRequest) =>
 export const generateCharacterRefSheet = (identifier: string) =>
   request<TaskResponse>(`/characters/${identifier}/generate-reference-sheet`, { method: "POST" });
 
-export const uploadCharacterPhoto = async (id: string, file: File): Promise<CharacterDetail> => {
+export const uploadCharacterPhoto = (id: string, file: File): Promise<CharacterDetail> => {
   const formData = new FormData();
   formData.append("file", file);
-  const res = await fetch(`${BASE}/characters/${id}/photo`, {
-    method: "POST",
-    body: formData,
-  });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`API error ${res.status}: ${body}`);
-  }
-  return res.json() as Promise<CharacterDetail>;
+  return requestFormData<CharacterDetail>(`/characters/${id}/photo`, formData);
 };
 
 export const deleteCharacterPhoto = (id: string) =>
   request(`/characters/${id}/photo`, { method: "DELETE" });
+
+export const refineCharacterRefSheet = (
+  id: string,
+  opts: { photo?: File; visual_constants?: string; color_palette?: string[] },
+): Promise<TaskResponse> => {
+  const formData = new FormData();
+  if (opts.photo) formData.append("photo", opts.photo);
+  if (opts.visual_constants !== undefined) formData.append("visual_constants", opts.visual_constants);
+  if (opts.color_palette !== undefined) formData.append("color_palette", JSON.stringify(opts.color_palette));
+  return requestFormData<TaskResponse>(`/characters/${id}/refine-reference-sheet`, formData);
+};
 
 // Family tree
 export const getFamilyTree = (charId: string) =>

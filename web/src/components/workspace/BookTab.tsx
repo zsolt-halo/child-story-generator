@@ -2,11 +2,12 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
-  startPdf, getTaskStatus, branchStory, deleteStory, startAnimate, getWorkerStatus,
+  startPdf, getTaskStatus, branchStory, deleteStory, getWorkerStatus,
 } from "../../api/client";
 import { useSSE } from "../../hooks/useSSE";
 import { useRenderSnapshot } from "../../hooks/useRenderSnapshot";
 import { usePipelineStore } from "../../stores/pipelineStore";
+import { useStoryActions } from "../../hooks/useStoryActions";
 import { BranchDialog } from "../BranchDialog";
 import { ConfirmDeleteDialog } from "../ConfirmDeleteDialog";
 import type { StoryDetail, SSEEvent, BranchRequest } from "../../api/types";
@@ -27,7 +28,7 @@ export function BookTab({ slug, data, invalidate }: BookTabProps) {
   const [showDelete, setShowDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [animating, setAnimating] = useState(false);
+  const { handleAnimate, animating } = useStoryActions(slug, invalidate);
 
   const hasPdfs = data.has_pdf || data.has_screen_pdf;
   const { modifiedCount, saveSnapshot } = useRenderSnapshot(slug, data.story.keyframes, hasPdfs);
@@ -114,18 +115,6 @@ export function BookTab({ slug, data, invalidate }: BookTabProps) {
       setDeleteError(String(err));
     } finally {
       setDeleting(false);
-    }
-  };
-
-  const handleAnimate = async () => {
-    setAnimating(true);
-    try {
-      const res = await startAnimate(slug);
-      setTaskId(res.task_id);
-      navigate(`/stories/${slug}/pipeline`, { state: { taskId: res.task_id } });
-    } catch (err) {
-      console.error("Failed to start animation:", err);
-      setAnimating(false);
     }
   };
 

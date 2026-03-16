@@ -30,7 +30,14 @@ def get_database_url() -> str:
 def get_async_engine():
     """Return a cached async SQLAlchemy engine."""
     url = get_database_url()
-    return create_async_engine(url, echo=False, pool_pre_ping=True)
+    return create_async_engine(
+        url,
+        echo=False,
+        pool_size=5,
+        max_overflow=5,
+        pool_recycle=1800,
+        pool_pre_ping=True,
+    )
 
 
 @functools.lru_cache(maxsize=1)

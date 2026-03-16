@@ -1,14 +1,11 @@
-import { useState } from "react";
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { useParams, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { getStory, startAnimate, getWorkerStatus } from "../api/client";
-import { usePipelineStore } from "../stores/pipelineStore";
+import { getStory, getWorkerStatus } from "../api/client";
+import { useStoryActions } from "../hooks/useStoryActions";
 
 export function BookPreview() {
   const { slug } = useParams<{ slug: string }>();
-  const navigate = useNavigate();
-  const setTaskId = usePipelineStore((s) => s.setTaskId);
-  const [animating, setAnimating] = useState(false);
+  const { handleAnimate, animating } = useStoryActions(slug!);
 
   const { data, isLoading } = useQuery({
     queryKey: ["story", slug],
@@ -21,19 +18,6 @@ export function BookPreview() {
     queryFn: getWorkerStatus,
     staleTime: 30_000,
   });
-
-  const handleAnimate = async () => {
-    if (!slug) return;
-    setAnimating(true);
-    try {
-      const res = await startAnimate(slug);
-      setTaskId(res.task_id);
-      navigate(`/stories/${slug}/pipeline`, { state: { taskId: res.task_id } });
-    } catch (err) {
-      console.error("Failed to start animation:", err);
-      setAnimating(false);
-    }
-  };
 
   if (isLoading) {
     return <div className="animate-pulse"><div className="h-8 bg-bark-100 rounded w-48" /></div>;
